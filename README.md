@@ -1,5 +1,3 @@
-*# Copyright 2018 - Thomas T. Jarløv*
-
 # Nim to Markdown
 
 This Nim package converts Nim code to Markdown. Use `nimtomd`
