@@ -28,7 +28,7 @@
 ## Examples
 ## --------
 ##
-## This README.md is made with `nimtomd` with the command:
+## This README.md is made with ``nimtomd`` with the command:
 ## .. code-block::plain
 ##    nimtomd -o:README.md -ow -global nimtomd.nim
 ##
@@ -42,8 +42,8 @@
 ## Save output to file
 ## ===================
 ##
-## You can force `nimtomd` to overwrite an existing file
-## by using the option `-ow`.
+## You can force ``nimtomd`` to overwrite an existing file
+## by using the option ``-ow``.
 ##
 ## .. code-block::plain
 ##    nimtomd -o:README.md filename.nim
@@ -53,6 +53,9 @@
 ##
 ## When importing nimtomd to your project, you can pass
 ## Nim code as a string or by pointing to a file.
+##
+## Both ``proc's`` will return a ``seq[string]`` which you can
+## loop through.
 ##
 ## **Parse file**
 ## .. code-block::Nim
@@ -254,15 +257,16 @@ proc formatCode(line: string) =
 
 
       # Add code
-      markdown.add("### " & codeElement[0].strip().replace(re"\(.*", ""))
-      markdown.add("```nim")
-      for i, h in codeElement:
-        if i == 0:
-          markdown.add(h.strip())
-        else:
-          markdown.add(h)
-      markdown.add("```")
-      markdown.add(line.substr(1, line.len()))
+      if codeElement.len() > 0:
+        markdown.add("### " & codeElement[0].strip().replace(re"\(.*", ""))
+        markdown.add("```nim")
+        for i, h in codeElement:
+          if i == 0:
+            markdown.add(h.strip())
+          else:
+            markdown.add(h)
+        markdown.add("```")
+        markdown.add(line.substr(1, line.len()))
 
       # Cleanup
       codeElement = @[]
@@ -420,6 +424,18 @@ proc textCode(line: string): bool =
 
     newBlock = true
 
+proc appendLastLine() =
+  ## When the file is ended and an element is in cache
+  if codeElement.len() > 0:
+    markdown.add("### " & codeElement[0].strip().replace(re"\(.*", ""))
+    markdown.add("```nim")
+    for i, h in codeElement:
+      if i == 0:
+        markdown.add(h.strip())
+      else:
+        markdown.add(h)
+    markdown.add("```")
+
 proc parseNim(filename: string) =
   ## Loop through file and generate Markdown
   for line in lines(filename):
@@ -431,6 +447,7 @@ proc parseNim(filename: string) =
     else:
       if not textCode(line):
         continue
+  appendLastLine()
 
 proc parseNimFile*(filename: string): seq[string] =
   ## Loop through file and generate Markdown
@@ -444,6 +461,7 @@ proc parseNimFile*(filename: string): seq[string] =
     else:
       if not textCode(line):
         continue
+  appendLastLine()
   return markdown
 
 proc parseNimString*(content: string): seq[string] =
@@ -457,15 +475,7 @@ proc parseNimString*(content: string): seq[string] =
     else:
       if not textCode(line):
         continue
-  if codeElement.len() > 0:
-    markdown.add("### " & codeElement[0].strip().replace(re"\(.*", ""))
-    markdown.add("```nim")
-    for i, h in codeElement:
-      if i == 0:
-        markdown.add(h.strip())
-      else:
-        markdown.add(h)
-    markdown.add("```")
+  appendLastLine()
   return markdown
 
 proc markdownShow() =
@@ -510,6 +520,12 @@ when isMainModule:
       quit(0)
 
     if outputFile.len() != 0:
-      markdownToFile(outputFile, overwrite)
+      if markdown.len() == 0:
+        styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
+      else:
+        markdownToFile(outputFile, overwrite)
     else:
-      markdownShow()
+      if markdown.len() == 0:
+        styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
+      else:
+        markdownShow()
