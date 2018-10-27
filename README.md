@@ -1,4 +1,8 @@
+*# Copyright 2018 - Thomas T. Jarløv*
+
 # Nim to Markdown
+
+*Generated with [Nim to Markdown](https://github.com/ThomasTJdev/nimtomd)*
 
 This Nim package converts Nim code to Markdown. Use `nimtomd`
 on your Nim file and transform it into a styled Markdown file.
@@ -18,11 +22,17 @@ but also be imported into your project.
 ## Options:
 ```
  filename.nim    File to output in Markdown
- help            Shows the help menu
- -o:[filename]   Outputs the markdown to a file
- -ow             Overwrites a file when -o is used
- -global         Only include global element (*)
+ -h, --help                Shows the help menu
+ -o:, --output:[filename]  Outputs the markdown to a file
+ -ow, --overwrite          Allow to overwrite a existing md file
+ -g, --global              Only include global elements (*)
 ```
+
+
+# Requirements
+
+Your code needs to follow the Nim commenting style. Checkout the
+source file for examples.
 
 
 # Examples
@@ -56,14 +66,15 @@ by using the option ``-ow``.
 When importing nimtomd to your project, you can pass
 Nim code as a string or by pointing to a file.
 
-Both ``proc's`` will return a ``seq[string]`` which you can
+You can get the Markdown in either a seq[string] or string.
+The proc's are documented in the "Types -> Proc's" section.
 loop through.
 
 **Parse file**
 ```nim
  import nimtomd
- parseNimFile("filename.nim")
- for line in markdown:
+ let md = parseNimFileSeq("filename.nim")
+ for line in md:
    echo line
 ```
 
@@ -78,22 +89,30 @@ loop through.
      return "Amen"
  """
 
- parseNimString(myNimCode)
- for line in markdown:
+ let md = parseNimContentString(myNimCode)
+ for line in md.split("\n"):
    echo line
 ```
 
 # Types
-
-
-### proc parseNimFile*
+## Procs
+### proc parseNimFileString*
 ```nim
-proc parseNimFile*(filename: string): seq[string] =
+proc parseNimFileString*(filename: string): string =
 ```
-Loop through file and generate Markdown
-
-### proc parseNimString*
+Loop through file and generate Markdown to string
+### proc parseNimFileSeq*
 ```nim
-proc parseNimString*(content: string): seq[string] =
+proc parseNimFileSeq*(filename: string): seq[string] =
 ```
-Loop through string and generate Markdown
+Loop through file and generate Markdown to seq[string]
+### proc parseNimContentString*
+```nim
+proc parseNimContentString*(content: string): string =
+```
+Loop through string and generate Markdown to string
+### proc parseNimContentSeq*
+```nim
+proc parseNimContentSeq*(content: string): seq[string] =
+```
+Loop through string and generate Markdown to seq[string]

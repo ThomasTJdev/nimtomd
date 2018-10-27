@@ -2,6 +2,8 @@
 ## Nim to Markdown
 ## ---------------
 ##
+## *Generated with [Nim to Markdown](https://github.com/ThomasTJdev/nimtomd)*
+##
 ## This Nim package converts Nim code to Markdown. Use `nimtomd`
 ## on your Nim file and transform it into a styled Markdown file.
 ##
@@ -20,10 +22,17 @@
 ## ========
 ## ..code-block::plain
 ##    filename.nim    File to output in Markdown
-##    help            Shows the help menu
-##    -o:[filename]   Outputs the markdown to a file
-##    -ow             Overwrites a file when -o is used
-##    -global         Only include global element (*)
+##    -h, --help                Shows the help menu
+##    -o:, --output:[filename]  Outputs the markdown to a file
+##    -ow, --overwrite          Allow to overwrite a existing md file
+##    -g, --global              Only include global elements (*)
+##
+## Requirements
+## ------------
+##
+## Your code needs to follow the Nim commenting style. Checkout the
+## source file for examples.
+##
 ##
 ## Examples
 ## --------
@@ -54,14 +63,15 @@
 ## When importing nimtomd to your project, you can pass
 ## Nim code as a string or by pointing to a file.
 ##
-## Both ``proc's`` will return a ``seq[string]`` which you can
+## You can get the Markdown in either a seq[string] or string.
+## The proc's are documented in the "Types -> Proc's" section.
 ## loop through.
 ##
 ## **Parse file**
 ## .. code-block::Nim
 ##    import nimtomd
-##    parseNimFile("filename.nim")
-##    for line in markdown:
+##    let md = parseNimFileSeq("filename.nim")
+##    for line in md:
 ##      echo line
 ##
 ## **Parse string**
@@ -74,12 +84,11 @@
 ##        return "Amen"
 ##    """
 ##
-##    parseNimString(myNimCode)
-##    for line in markdown:
+##    let md = parseNimContentString(myNimCode)
+##    for line in md.split("\n"):
 ##      echo line
 
 import os, strutils, re, terminal
-
 
 const
   nimtomd = """
@@ -94,60 +103,103 @@ Usage:
   nimtomd [options] <filename>
 
 Options:
-  filename.nim    File to output in Markdown
-  help            Shows the help menu
-  -o:[filename]   Outputs the markdown to a file
-  -ow             Overwrites a file when -o is used
-  -global         Only include global element (*)"""
+  filename.nim              File to output in Markdown
+  -h, --help                Shows the help menu
+  -o:, --output:[filename]  Outputs the markdown to a file
+  -ow, --overwrite          Allow to overwrite a existing md file
+  -g, --global              Only include global elements (*)"""
 
 
-var markdown:seq[string] = @[]
-var mdTop:seq[string] = @[]
-var mdImport:seq[string] = @[]
-var mdInclude:seq[string] = @[]
-var mdCodeProc:seq[string] = @[]
-var mdCodeTemplate:seq[string] = @[]
-var mdCodeMacro:seq[string] = @[]
+var mdTop:seq[string]
+var mdImport:seq[string]
+var mdInclude:seq[string]
+var mdCodeProc:seq[string]
+var mdCodeTemplate:seq[string]
+var mdCodeMacro:seq[string]
+var mdCodeIterator:seq[string]
+var mdCodeFunc:seq[string]
+var mdCodeOther:seq[string]
 
-var lineNew = ""
-var lineOld = ""
+var lineNew: string
+var lineOld: string
+var firstRun: bool
+var firstComment: bool
+var newBlock: bool
+var copyrightInserted: bool
+var globalOnly: bool
+var globalActive: bool
+var codeElementLast: bool
+var codeElement: seq[string]
+var codeElementSingleLine: bool
+var codeIsReached: bool
+var codeFirstRun: bool
+var codeBlockOpen: bool
+var codeBlockFirstLine: bool
+var activeElement: string
 
+proc addToMd(data: string) =
+  if data.len() == 0:
+    return
+  case activeElement
+  of "proc":
+    mdCodeProc.add(data)
+  of "template":
+    mdCodeTemplate.add(data)
+  of "macro":
+    mdCodeMacro.add(data)
+  of "iterator":
+    mdCodeIterator.add(data)
+  of "func":
+    mdCodeFunc.add(data)
+  else:
+    mdCodeOther.add(data)
 
-var firstRun = true
-var firstComment = false
+proc initMdContainers() =
+  mdTop = @[]
+  mdImport = @[]
+  mdInclude = @[]
+  mdCodeProc = @[]
+  mdCodeTemplate = @[]
+  mdCodeMacro = @[]
+  mdCodeIterator = @[]
+  mdCodeFunc = @[]
+  mdCodeOther = @[]
 
-var newBlock = true
-
-var copyrightInserted = false
-
-var globalOnly = false
-var globalActive = false
-
-var codeElementLast = false
-var codeElement: seq[string] = @[]
-var codeElementSingleLine = false
-
-var codeIsReached = false
-var codeFirstRun = true
-
-var codeBlockOpen = false
-var codeBlockFirstLine = false
-
-
+  lineNew = ""
+  lineOld = ""
+  firstRun = true
+  firstComment = false
+  newBlock = true
+  copyrightInserted = false
+  globalActive = false
+  codeElementLast = false
+  codeElement = @[]
+  codeElementSingleLine = false
+  codeIsReached = false
+  codeFirstRun = true
+  codeBlockOpen = false
+  codeBlockFirstLine = false
+  activeElement = ""
 
 proc isElement(line: string): bool =
   ## Check if line has an element
   if line.contains("#"):
+    activeElement = "other"
     return false
   if line.strip().substr(0, 3) == "proc":
+    activeElement = "proc"
     return true
   if line.strip().substr(0, 7) == "template":
+    activeElement = "template"
     return true
   if line.strip().substr(0, 4) == "macro":
+    activeElement = "macro"
     return true
   if line.strip().substr(0, 7) == "iterator":
+    activeElement = "iterator"
     return true
   if line.strip().substr(0, 3) == "func":
+    activeElement = "func"
     return true
 
 proc isGlobal(line: string): bool =
@@ -161,7 +213,6 @@ proc isGlobal(line: string): bool =
   if line.contains(re".*\*\{"):
     return true
   return false
-
 
 proc formatTop(line: string): bool =
   ## Format top comments
@@ -235,7 +286,6 @@ proc formatTop(line: string): bool =
 
   return true
 
-
 proc fileCheckBasic(line: string): bool =
   ## Basic check of file
 
@@ -270,7 +320,6 @@ proc fileCheckBasic(line: string): bool =
 
   return true
 
-
 proc textTop(line: string): bool =
   ## Check the top text
   if line.substr(0, 1) == "##":
@@ -292,16 +341,15 @@ proc textTop(line: string): bool =
 
   return true
 
-
 proc formatCode(line: string) =
   ## Format the code
 
   if contains(lineNew, ".. code-block::") or contains(lineNew, "..code-block::"):
     # Start a code block
     if contains(lineNew, "plain") or contains(lineNew, "Plain"):
-      markdown.add("```")
+      addToMd("```")
     else:
-      markdown.add("```nim")
+      addToMd("```nim")
     codeBlockFirstLine = true
     codeBlockOpen = true
   else:
@@ -323,20 +371,20 @@ proc formatCode(line: string) =
           globalActive = false
           return
 
-      markdown.add("") # Add spacing
+      addToMd("") # Add spacing
 
 
       # Add code
       if codeElement.len() > 0:
-        markdown.add("### " & codeElement[0].strip().replace(re"\(.*", ""))
-        markdown.add("```nim")
+        addToMd("### " & codeElement[0].strip().replace(re"\(.*", ""))
+        addToMd("```nim")
         for i, h in codeElement:
           if i == 0:
-            markdown.add(h.strip())
+            addToMd(h.strip())
           else:
-            markdown.add(h)
-        markdown.add("```")
-        markdown.add(line.substr(1, line.len()))
+            addToMd(h)
+        addToMd("```")
+        addToMd(line.substr(1, line.len()))
 
       # Cleanup
       codeElement = @[]
@@ -344,10 +392,7 @@ proc formatCode(line: string) =
 
     else:
       # Just insert
-      markdown.add(line.substr(1, line.len()))
-
-
-
+      addToMd(line.substr(1, line.len()))
 
 proc textCode(line: string): bool =
   ## Work with the code text
@@ -365,7 +410,7 @@ proc textCode(line: string): bool =
       mdTop.add("```")
       mdTop.add("")
       codeBlockOpen = false
-    markdown.add("")
+    addToMd("")
     codeFirstRun = false
 
   # Check if global is required
@@ -381,7 +426,7 @@ proc textCode(line: string): bool =
     mdInclude.add(line.strip())
     return false
 
-  # Checkf line has double ##
+  # Check line has 2xhashtag
   if contains(line, " ##"):
   #if contains(line.strip().substr(0,1), "##"):
     codeElementLast = false
@@ -392,22 +437,23 @@ proc textCode(line: string): bool =
       return false
 
     # Single line element and comment
-    # Checks for <alpha ##> and <` ##>
+    # Checks for <alpha 2xhashtag> and <` 2xhashtag>
     if line.contains(re"\S.*##") or line.contains(re"\`.*##"):
-      markdown.add("")
+      discard isElement(line)
+      addToMd("")
       # Clean heading with =, : and {
-      markdown.add("### " & (line.multiReplace([(re"\=.*", ""), (re"\:.*", ""), (re"\{.*", "")])).strip())
-      markdown.add("```nim")
-      markdown.add(line.replace(re"##.*", "").strip())
-      markdown.add("```")
-      markdown.add(line.replace(re".*## ", ""))
+      addToMd("### " & (line.multiReplace([(re"\=.*", ""), (re"\:.*", ""), (re"\{.*", "")])).strip())
+      addToMd("```nim")
+      addToMd(line.replace(re"##.*", "").strip())
+      addToMd("```")
+      addToMd(line.replace(re".*## ", ""))
       codeElement = @[]
       codeElementSingleLine = true
 
     # Check if single line comment has been active.
     # This is used for multiple line comments for a single line element
     elif codeElementSingleLine and line.contains(re".*##\s\S"):
-      markdown.add(line.replace(re".*##", ""))
+      addToMd(line.replace(re".*##", ""))
 
     # New codeblock or comment under element
     else:
@@ -416,21 +462,21 @@ proc textCode(line: string): bool =
       formatCode(lineNew)
       lineOld = lineNew
 
-  # If line does not contain double ##
+  # If line does not contain 2xhashtag
   else:
     # Is the line an element
     if isElement(line):
 
       # If codeElement has an element in storage, insert it before adding a new
       if codeElement.len() > 0:
-        markdown.add("### " & codeElement[0].strip().replace(re"\(.*", ""))
-        markdown.add("```nim")
+        addToMd("### " & codeElement[0].strip().replace(re"\(.*", ""))
+        addToMd("```nim")
         for i, h in codeElement:
           if i == 0:
-            markdown.add(h.strip())
+            addToMd(h.strip())
           else:
-            markdown.add(h)
-        markdown.add("```")
+            addToMd(h)
+        addToMd("```")
 
         codeElement = @[]
 
@@ -453,27 +499,118 @@ proc textCode(line: string): bool =
 
       # Close code block if open or append
       if replace(line, "#", "").len() >= 1 and line.substr(0,2) != "   ":
-        markdown.add("```")
+        addToMd("```")
         codeBlockOpen = false
       else:
-        markdown.add(line.substr(1, line.len()))
+        addToMd(line.substr(1, line.len()))
 
     newBlock = true
 
 proc appendLastLine() =
   ## When the file is ended and an element is in cache
   if codeElement.len() > 0:
-    markdown.add("### " & codeElement[0].strip().replace(re"\(.*", ""))
-    markdown.add("```nim")
+    addToMd("### " & codeElement[0].strip().replace(re"\(.*", ""))
+    addToMd("```nim")
     for i, h in codeElement:
       if i == 0:
-        markdown.add(h.strip())
+        addToMd(h.strip())
       else:
-        markdown.add(h)
-    markdown.add("```")
+        addToMd(h)
+    addToMd("```")
+
+proc generateMarkdown(): string =
+  ## Generate markdown to string
+  for line in mdTop:
+    result.add(line & "\n")
+  if mdImport.len() > 0:
+    result.add("# Imports\n")
+    for line in mdImport:
+      result.add(line & "\n\n")
+  if mdInclude.len() > 0:
+    result.add("# Include\n")
+    for line in mdInclude:
+      result.add(line & "\n\n")
+  result.add("# Types\n")
+  if mdCodeProc.len() > 0:
+    result.add("## Procs\n")
+    for line in mdCodeProc:
+      result.add(line & "\n")
+  if mdCodeTemplate.len() > 0:
+    result.add("## Templates\n")
+    for line in mdCodeTemplate:
+      result.add(line & "\n")
+  if mdCodeMacro.len() > 0:
+    result.add("## Macros\n")
+    for line in mdCodeMacro:
+      result.add(line & "\n")
+  if mdCodeIterator.len() > 0:
+    result.add("## Iterators\n")
+    for line in mdCodeIterator:
+      result.add(line & "\n")
+  if mdCodeFunc.len() > 0:
+    result.add("## Funcs\n")
+    for line in mdCodeFunc:
+      result.add(line & "\n")
+  if mdCodeOther.len() > 0:
+    result.add("## Other\n")
+    for line in mdCodeOther:
+      result.add(line & "\n")
+
+proc generateMarkdownSeq(): seq[string] =
+  ## Generate markdown to seq
+  var md: seq[string] = @[]
+  if mdTop.len() > 0:
+    md.add(mdTop)
+  if mdImport.len() > 0:
+    md.add("# Imports\n")
+    md.add(mdImport)
+  if mdInclude.len() > 0:
+    md.add("# Include\n")
+    md.add(mdInclude)
+  md.add("# Types\n")
+  if mdCodeProc.len() > 0:
+    md.add("## Procs\n")
+    md.add(mdCodeProc)
+  if mdCodeTemplate.len() > 0:
+    md.add("## Templates\n")
+    md.add(mdCodeTemplate)
+  if mdCodeMacro.len() > 0:
+    md.add("## Macros\n")
+    md.add(mdCodeMacro)
+  if mdCodeIterator.len() > 0:
+    md.add("## Iterators\n")
+    md.add(mdCodeIterator)
+  if mdCodeFunc.len() > 0:
+    md.add("## Funcs\n")
+    md.add(mdCodeFunc)
+  if mdCodeOther.len() > 0:
+    md.add("## Other\n")
+    md.add(mdCodeOther)
+  return md
+
+proc markdownShow() =
+  ## Echo markdown
+  let md = generateMarkdown()
+  if md.len() == 0:
+    styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
+  else:
+    for line in md.split("\n"):
+      echo line
+
+proc markdownToFile(filename: string, overwrite = false) =
+  ## Save markdown to file
+  if not overwrite and fileExists(filename):
+    styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "File exists. Use -ow to overwrite.")
+  else:
+    let md = generateMarkdown()
+    if md.len() == 0:
+      styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
+
+    writeFile(filename, md)
 
 proc parseNim(filename: string) =
   ## Loop through file and generate Markdown
+  initMdContainers()
   for line in lines(filename):
     if not fileCheckBasic(line):
       continue
@@ -485,9 +622,9 @@ proc parseNim(filename: string) =
         continue
   appendLastLine()
 
-proc parseNimFile*(filename: string): seq[string] =
+proc parseNimFile(filename: string) =
   ## Loop through file and generate Markdown
-  markdown = @[]
+  initMdContainers()
   for line in lines(filename):
     if not fileCheckBasic(line):
       continue
@@ -498,10 +635,10 @@ proc parseNimFile*(filename: string): seq[string] =
       if not textCode(line):
         continue
   appendLastLine()
-  return markdown
 
-proc parseNimString*(content: string): seq[string] =
+proc parseNimString(content: string) =
   ## Loop through string and generate Markdown
+  initMdContainers()
   for line in split(content, "\n"):
     if not fileCheckBasic(line):
       continue
@@ -512,74 +649,58 @@ proc parseNimString*(content: string): seq[string] =
       if not textCode(line):
         continue
   appendLastLine()
-  return markdown
 
-proc markdownShow() =
-  ## Echo markdown
-  for line in mdTop:
-    echo line
-  for line in markdown:
-    echo line
+proc parseNimFileString*(filename: string): string =
+  ## Loop through file and generate Markdown to string
+  parseNimFile(filename)
+  return generateMarkdown()
 
-proc markdownToFile(filename: string, overwrite = false) =
-  ## Save markdown to file
-  if not overwrite and fileExists(filename):
-    styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "File exists. Use -ow to overwrite.")
-    return
+proc parseNimFileSeq*(filename: string): seq[string] =
+  ## Loop through file and generate Markdown to seq[string]
+  parseNimFile(filename)
+  return generateMarkdownSeq()
 
-  var content: string
-  for line in mdTop:
-    content.add(line & "\n")
+proc parseNimContentString*(content: string): string =
+  ## Loop through string and generate Markdown to string
+  parseNimString(content)
+  return generateMarkdown()
 
-  
-  if mdImport.len() > 0:
-    content.add("# Imports\n")
-    for line in mdImport:
-      content.add(line & "\n\n")
-
-  if mdInclude.len() > 0:
-    content.add("# Include\n")
-    for line in mdInclude:
-      content.add(line & "\n\n")
-      
-  content.add("# Types")
-
-  for line in markdown:
-    content.add(line & "\n")
-
-  writeFile(filename, content)
+proc parseNimContentSeq*(content: string): seq[string] =
+  ## Loop through string and generate Markdown to seq[string]
+  parseNimString(content)
+  return generateMarkdownSeq()
 
 when isMainModule:
-  let args = commandLineParams()
-  if args.len() == 0:
+  let args = multiReplace(commandLineParams().join(","), [("-", ""), (" ", "")])
+  case args
+  of "", " ":
     echo nimtomd
-  elif "help" in args:
+
+  of "h", "help":
     echo help
+
   else:
     var toFile = false
     var outputFile = ""
     var overwrite = false
-    for arg in args:
-      if arg.substr(0, 2) == "-o:":
-        outputFile = arg.substr(3, arg.len())
-      elif arg == "-ow":
+    let argsSplit = args.split(",")
+    for arg in argsSplit:
+      if arg.contains("o:"):
+        outputFile = arg.substr(2, arg.len())
+      elif arg.contains("output:"):
+        outputFile = arg.substr(7, arg.len())
+      elif arg == "ow" or arg == "overwrite":
         overwrite = true
-      elif arg == "-global":
+      elif arg == "global" or arg == "g":
         globalOnly = true
 
-    if fileExists(args[args.len() - 1]):
-      parseNim(args[args.len() - 1])
+    if fileExists(argsSplit[argsSplit.len() - 1]):
+      parseNim(argsSplit[argsSplit.len() - 1])
     else:
-      styledWriteLine(stderr, fgRed, "ERROR: ", resetStyle, "File not found: " & args[args.len() - 1])
+      styledWriteLine(stderr, fgRed, "ERROR: ", resetStyle, "File not found: " & argsSplit[argsSplit.len() - 1])
       quit(0)
 
     if outputFile.len() != 0:
-      if markdown.len() == 0:
-        styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
-      else:
-        markdownToFile(outputFile, overwrite)
+      markdownToFile(outputFile, overwrite)
     else:
-      if markdown.len() == 0:
-        styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
-      else:
-        markdownShow()
+      markdownShow()
