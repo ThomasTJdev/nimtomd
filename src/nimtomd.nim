@@ -102,6 +102,12 @@ Options:
 
 
 var markdown:seq[string] = @[]
+var mdTop:seq[string] = @[]
+var mdImport:seq[string] = @[]
+var mdInclude:seq[string] = @[]
+var mdCodeProc:seq[string] = @[]
+var mdCodeTemplate:seq[string] = @[]
+var mdCodeMacro:seq[string] = @[]
 
 var lineNew = ""
 var lineOld = ""
@@ -151,6 +157,8 @@ proc isGlobal(line: string): bool =
     return true
   if line.contains(re".*\S.*\*\["):
     return true
+  if line.contains(re".*\*\{"):
+    return true
   return false
 
 
@@ -171,54 +179,59 @@ proc formatTop(line: string): bool =
     if contains(lineNew.replace(" ", ""), "..code-block::"):
       # Check if this is going to be a codeblock
       if contains(toLowerAscii(lineNew), "plain"):
-        markdown.add("```")
-        markdown.add("")
-        markdown.add("")
-        markdown.add("```")
+        mdTop.add("```")
+        mdTop.add("")
+        mdTop.add("")
+        mdTop.add("```")
       else:
-        markdown.add("```")
-        markdown.add("")
-        markdown.add("")
-        markdown.add("```nim")
+        mdTop.add("```")
+        mdTop.add("")
+        mdTop.add("")
+        mdTop.add("```nim")
 
       codeBlockFirstLine = true
       codeBlockOpen = true
-    elif (replace(line, "#", "").len() >= 1 and line.substr(0,2) != "   "):
-      # Close the codeblock
-      markdown.add("```")
-      markdown.add("")
-      markdown.add("")
-      markdown.add(line)
+
+    elif (replace(line, "#", "").len() >= 1 and line.substr(0,2) != "   ") or
+          (replace(line, "#", "").len() == 0 and replace(lineOld, "#", "").len() == 0):
+      # Close the codeblock of new text is found or if
+      # the last line and current line are blank
+      mdTop.add("```")
+      mdTop.add("")
+      mdTop.add("")
+      mdTop.add(line)
       codeBlockOpen = false
+
     else:
       if codeBlockFirstLine:
         # If this is the first line in the codeblock
         codeBlockFirstLine = false
       else:
-        markdown.add(lineOld.substr(3, lineOld.len()))
+        mdTop.add(lineOld.substr(3, lineOld.len()))
 
   elif contains(lineNew.replace(" ", ""), "..code-block::"):
     # Check if this is going to be a codeblock
     if contains(toLowerAscii(lineNew), "plain"):
-      markdown.add("```")
+      mdTop.add("```")
     else:
-      markdown.add("```nim")
+      mdTop.add("```nim")
 
     codeBlockFirstLine = true
     codeBlockOpen = true
 
   elif contains(lineNew, "---"):
     # Make heading H1
-    markdown.delete(markdown.len())
-    markdown.add("#" & lineOld)
+    if mdTop.len() > 0: mdTop.delete(mdTop.len())
+    mdTop.add("#" & lineOld)
+
   elif contains(lineNew, "===") or contains(lineNew, "^^^"):
     # Make sub heading H2
-    markdown.delete(markdown.len())
-    markdown.add("##" & lineOld)
+    if mdTop.len() > 0: mdTop.delete(mdTop.len())
+    mdTop.add("##" & lineOld)
+
   else:
     # Add line
-    #markdown.add(line)
-    markdown.add(line.substr(1, line.len()))
+    mdTop.add(line.substr(1, line.len()))
 
   return true
 
@@ -244,7 +257,8 @@ proc formatCode(line: string) =
         # Check if this is global
         var isGlobal = false
         for a in codeElement:
-          if "*(" in a or "*[" in a:
+          #if "*(" in a or "*[" in a:
+          if isGlobal(a):
             isGlobal = true
             globalActive = true
             break
@@ -285,15 +299,15 @@ proc fileCheckBasic(line: string): bool =
 
   if not firstComment:
     if line.substr(0,1) == "# " and not copyrightInserted and toLowerAscii(line).contains("copyright"):
-      markdown.add("*" & line & "*")
-      markdown.add("")
+      mdTop.add("*" & line & "*")
+      mdTop.add("")
       copyrightInserted = true
       return false
 
     elif line.substr(0,1) == "##":
       firstComment = true
       lineOld = line.substr(2, line.len())
-      markdown.add(line.substr(3, line.len()))
+      mdTop.add(line.substr(3, line.len()))
 
     elif line == "" or line.substr(0,1) == "# " or line.len() == 1:
       return false
@@ -480,6 +494,8 @@ proc parseNimString*(content: string): seq[string] =
 
 proc markdownShow() =
   ## Echo markdown
+  for line in mdTop:
+    echo line
   for line in markdown:
     echo line
 
@@ -490,6 +506,8 @@ proc markdownToFile(filename: string, overwrite = false) =
     return
 
   var content: string
+  for line in mdTop:
+    content.add(line & "\n")
   for line in markdown:
     content.add(line & "\n")
 
