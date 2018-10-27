@@ -125,6 +125,7 @@ var globalActive = false
 
 var codeElementLast = false
 var codeElement: seq[string] = @[]
+var codeElementSingleLine = false
 
 var codeIsReached = false
 var codeFirstRun = true
@@ -351,15 +352,19 @@ proc formatCode(line: string) =
 proc textCode(line: string): bool =
   ## Work with the code text
 
+  # Check if this is a single line comment continued
+  if line.strip().len() == 0:
+    codeElementSingleLine = false
+
   # If this is first time the code text is reached.
   if codeFirstRun:
-    # Close open codeblocks and insert heading
+    # Close open codeblocks from mdTop. codeFirstRun: bool is used to
+    # identify mdTop
     if codeBlockOpen:
-      markdown.add(lineNew.substr(3, lineNew.len()))
-      markdown.add("```")
+      mdTop.add(lineNew.substr(3, lineNew.len()))
+      mdTop.add("```")
+      mdTop.add("")
       codeBlockOpen = false
-    markdown.add("")
-    markdown.add("# Types")
     markdown.add("")
     codeFirstRun = false
 
@@ -368,8 +373,17 @@ proc textCode(line: string): bool =
     if not isGlobal(line): #not line.contains(re"\S.*\*"):
       return false
 
+  if line.substr(0, 5) == "import":
+    mdImport.add(line.strip())
+    return false
+
+  if line.substr(0, 6) == "include":
+    mdInclude.add(line.strip())
+    return false
+
   # Checkf line has double ##
-  if contains(line.strip().substr(0,1), "##"):
+  if contains(line, " ##"):
+  #if contains(line.strip().substr(0,1), "##"):
     codeElementLast = false
 
     # Skip TODO's comments
@@ -378,24 +392,33 @@ proc textCode(line: string): bool =
       return false
 
     # Single line element and comment
-    if line.contains(re"\S.*##"):
-
+    # Checks for <alpha ##> and <` ##>
+    if line.contains(re"\S.*##") or line.contains(re"\`.*##"):
       markdown.add("")
-      markdown.add("### " & (line.multiReplace([(re"\=.*", ""), (re"\:.*", "")])).strip())
+      # Clean heading with =, : and {
+      markdown.add("### " & (line.multiReplace([(re"\=.*", ""), (re"\:.*", ""), (re"\{.*", "")])).strip())
       markdown.add("```nim")
-      markdown.add(line.replace(re"##.*", ""))
+      markdown.add(line.replace(re"##.*", "").strip())
       markdown.add("```")
       markdown.add(line.replace(re".*## ", ""))
       codeElement = @[]
+      codeElementSingleLine = true
+
+    # Check if single line comment has been active.
+    # This is used for multiple line comments for a single line element
+    elif codeElementSingleLine and line.contains(re".*##\s\S"):
+      markdown.add(line.replace(re".*##", ""))
 
     # New codeblock or comment under element
     else:
+      codeElementSingleLine = false
       lineNew = line.replace(re".*##", "")
       formatCode(lineNew)
       lineOld = lineNew
 
   # If line does not contain double ##
   else:
+    # Is the line an element
     if isElement(line):
 
       # If codeElement has an element in storage, insert it before adding a new
@@ -419,7 +442,7 @@ proc textCode(line: string): bool =
       codeElementLast = true
 
     if codeElementLast:
-      # check for `): xxx =`, `{xxx} = and `) =`
+      # check for "): xxx =", "{ xxx } xxx =" = and ") xxx ="
       if line.contains(re"\)\:.*\=") or line.contains(re"\{.*\}.*\=") or line.contains(re"\).*\="):
         codeElementLast = false
       codeElement.add(line)
@@ -507,6 +530,20 @@ proc markdownToFile(filename: string, overwrite = false) =
   var content: string
   for line in mdTop:
     content.add(line & "\n")
+
+  
+  if mdImport.len() > 0:
+    content.add("# Imports\n")
+    for line in mdImport:
+      content.add(line & "\n\n")
+
+  if mdInclude.len() > 0:
+    content.add("# Include\n")
+    for line in mdInclude:
+      content.add(line & "\n\n")
+      
+  content.add("# Types")
+
   for line in markdown:
     content.add(line & "\n")
 
