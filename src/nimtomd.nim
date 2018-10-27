@@ -136,6 +136,7 @@ var codeFirstRun: bool
 var codeBlockOpen: bool
 var codeBlockFirstLine: bool
 var activeElement: string
+var lastActiveElement: string
 
 proc addToMd(data: string) =
   if data.len() == 0:
@@ -180,6 +181,7 @@ proc initMdContainers() =
   codeBlockOpen = false
   codeBlockFirstLine = false
   activeElement = ""
+  lastActiveElement = ""
 
 proc isElement(line: string): bool =
   ## Check if line has an element
@@ -355,6 +357,7 @@ proc formatCode(line: string) =
   else:
     codeElementLast = false
     if newBlock:
+      discard isElement(line)
       # Starting a new block
 
       if globalOnly:
@@ -439,6 +442,10 @@ proc textCode(line: string): bool =
     # Single line element and comment
     # Checks for <alpha 2xhashtag> and <` 2xhashtag>
     if line.contains(re"\S.*##") or line.contains(re"\`.*##"):
+      #Check if only global is allowed
+      if globalOnly:
+        if not isGlobal(line): #not line.contains(re"\S.*\*"):
+          return false
       discard isElement(line)
       addToMd("")
       # Clean heading with =, : and {
@@ -466,9 +473,13 @@ proc textCode(line: string): bool =
   else:
     # Is the line an element
     if isElement(line):
-
       # If codeElement has an element in storage, insert it before adding a new
       if codeElement.len() > 0:
+        activeElement = lastActiveElement
+
+        if codeBlockOpen:       # TEST
+          addToMd("```")        # TEST
+          codeBlockOpen = false # TEST
         addToMd("### " & codeElement[0].strip().replace(re"\(.*", ""))
         addToMd("```nim")
         for i, h in codeElement:
@@ -480,6 +491,9 @@ proc textCode(line: string): bool =
 
         codeElement = @[]
 
+      discard isElement(line)
+      lastActiveElement = activeElement
+
       # Check if only global is allowed
       if globalOnly:
         if not isGlobal(line): #not line.contains(re"\S.*\*"):
@@ -489,7 +503,7 @@ proc textCode(line: string): bool =
 
     if codeElementLast:
       # check for "): xxx =", "{ xxx } xxx =" = and ") xxx ="
-      if line.contains(re"\)\:.*\=") or line.contains(re"\{.*\}.*\=") or line.contains(re"\).*\="):
+      if line.contains(re"\)\:.*\=") or line.contains(re"\{.*\}.*\=") or line.contains(re"\).*\=") or line.contains(re"\(.*\).*\{.*\}"):
         codeElementLast = false
       codeElement.add(line)
 
