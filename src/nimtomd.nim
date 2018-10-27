@@ -162,7 +162,6 @@ proc isGlobal(line: string): bool =
   return false
 
 
-
 proc formatTop(line: string): bool =
   ## Format top comments
 
@@ -236,6 +235,62 @@ proc formatTop(line: string): bool =
   return true
 
 
+proc fileCheckBasic(line: string): bool =
+  ## Basic check of file
+
+  if line == "when isMainModule:":
+    return false
+
+  if not firstComment:
+    if line.substr(0,1) == "# " and not copyrightInserted and toLowerAscii(line).contains("copyright"):
+      mdTop.add("*" & line & "*")
+      mdTop.add("")
+      copyrightInserted = true
+      return false
+
+    elif line.substr(0,1) == "##":
+      firstComment = true
+      lineOld = line.substr(2, line.len())
+      mdTop.add(line.substr(3, line.len()))
+
+    elif line == "" or line.substr(0,1) == "# " or line.len() == 1:
+      return false
+
+    else:
+      firstComment = true
+
+  # If the code body is reached.
+  # Checked with line = "" (ending of top comment) or line containing alpha.
+  if not codeIsReached and (line == "" or isAlphaAscii(line.strip().substr(0, 1))):
+    codeIsReached = true
+    return true
+  elif line.substr(0, 1) == "# ":
+    return false
+
+  return true
+
+
+proc textTop(line: string): bool =
+  ## Check the top text
+  if line.substr(0, 1) == "##":
+    lineNew = line.substr(2, line.len())
+
+    if firstRun:
+      firstRun = false
+      return false
+
+    if not formatTop(lineNew):
+      return false
+
+    lineOld = lineNew
+
+  else:
+    if codeBlockOpen:
+      mdTop.add("```")
+      codeBlockOpen = false
+
+  return true
+
 
 proc formatCode(line: string) =
   ## Format the code
@@ -290,62 +345,6 @@ proc formatCode(line: string) =
       # Just insert
       markdown.add(line.substr(1, line.len()))
 
-
-proc fileCheckBasic(line: string): bool =
-  ## Basic check of file
-
-  if line == "when isMainModule:":
-    return false
-
-  if not firstComment:
-    if line.substr(0,1) == "# " and not copyrightInserted and toLowerAscii(line).contains("copyright"):
-      mdTop.add("*" & line & "*")
-      mdTop.add("")
-      copyrightInserted = true
-      return false
-
-    elif line.substr(0,1) == "##":
-      firstComment = true
-      lineOld = line.substr(2, line.len())
-      mdTop.add(line.substr(3, line.len()))
-
-    elif line == "" or line.substr(0,1) == "# " or line.len() == 1:
-      return false
-
-    else:
-      firstComment = true
-
-  # If the code body is reached.
-  # Checked with line = "" (ending of top comment) or line containing alpha.
-  if not codeIsReached and (line == "" or isAlphaAscii(line.strip().substr(0, 1))):
-    codeIsReached = true
-    return true
-  elif line.substr(0, 1) == "# ":
-    return false
-
-  return true
-
-
-proc textTop(line: string): bool =
-  ## Check the top text
-  if line.substr(0, 1) == "##":
-    lineNew = line.substr(2, line.len())
-
-    if firstRun:
-      firstRun = false
-      return false
-
-    if not formatTop(lineNew):
-      return false
-
-    lineOld = lineNew
-
-  else:
-    if codeBlockOpen:
-      markdown.add("```")
-      codeBlockOpen = false
-
-  return true
 
 
 
