@@ -9,9 +9,6 @@
 ## You can choose to only include global elements (*) and top
 ## comments, or you can include everything.
 ##
-## The package is *hybrid* which means, it can run as binary
-## but also be imported into your project.
-##
 ## Usage:
 ## =====
 ## .. code-block::plain
