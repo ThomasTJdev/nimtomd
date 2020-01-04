@@ -75,7 +75,7 @@
 ##      echo line
 ##
 ## **Parse string**
-## .. code-block::Nim QQ
+## .. code-block::Nim
 ##    import nimtomd
 ##    let myNimCode = """
 ##      proc special*(data: string): string =
@@ -110,33 +110,38 @@ Options:
   -g, --global              Only include global elements (*)"""
 
 
-var mdTop:seq[string]
-var mdImport:seq[string]
-var mdInclude:seq[string]
-var mdCodeProc:seq[string]
-var mdCodeTemplate:seq[string]
-var mdCodeMacro:seq[string]
-var mdCodeIterator:seq[string]
-var mdCodeFunc:seq[string]
-var mdCodeOther:seq[string]
+var
+  mdTop:seq[string]
+  mdImport:seq[string]
+  mdInclude:seq[string]
+  mdCodeProc:seq[string]
+  mdCodeTemplate:seq[string]
+  mdCodeMacro:seq[string]
+  mdCodeIterator:seq[string]
+  mdCodeFunc:seq[string]
+  mdCodeOther:seq[string]
+  mdCodeType:seq[string]
 
-var lineNew: string
-var lineOld: string
-var firstRun: bool
-var firstComment: bool
-var newBlock: bool
-var copyrightInserted: bool
-var globalOnly: bool
-var globalActive: bool
-var codeElementLast: bool
-var codeElement: seq[string]
-var codeElementSingleLine: bool
-var codeIsReached: bool
-var codeFirstRun: bool
-var codeBlockOpen: bool
-var codeBlockFirstLine: bool
-var activeElement: string
-var lastActiveElement: string
+var
+  lineNew: string
+  lineOld: string
+  firstRun: bool
+  firstComment: bool
+  newBlock: bool
+  copyrightInserted: bool
+  globalOnly: bool
+  globalActive: bool
+  codeElementLast: bool
+  codeElement: seq[string]
+  codeElementSingleLine: bool
+  codeIsReached: bool
+  codeFirstRun: bool
+  codeBlockOpen: bool
+  codeBlockFirstLine: bool
+  activeElement: string
+  lastActiveElement: string
+  importActive: bool
+  lineLast: string
 
 proc addToMd(data: string) =
   if data.len() == 0:
@@ -152,6 +157,10 @@ proc addToMd(data: string) =
     mdCodeIterator.add(data)
   of "func":
     mdCodeFunc.add(data)
+  of "type":
+    if data == "### type" or data == "## type":
+      return
+    mdCodeType.add(data)
   else:
     mdCodeOther.add(data)
 
@@ -165,6 +174,7 @@ proc initMdContainers() =
   mdCodeIterator = @[]
   mdCodeFunc = @[]
   mdCodeOther = @[]
+  mdCodeType = @[]
 
   lineNew = ""
   lineOld = ""
@@ -182,6 +192,7 @@ proc initMdContainers() =
   codeBlockFirstLine = false
   activeElement = ""
   lastActiveElement = ""
+  importActive = false
 
 proc isElement(line: string): bool =
   ## Check if line has an element
@@ -203,18 +214,22 @@ proc isElement(line: string): bool =
   if line.strip().substr(0, 3) == "func":
     activeElement = "func"
     return true
+  if line.strip().substr(0, 3) == "type":
+    activeElement = "type"
+    return true
 
 proc isGlobal(line: string): bool =
   ## Check if line has global identifier
   if line.contains(re".*\S.*\*\("):
     return true
-  if line.contains(re".*\S.*\*\:"):
+  elif line.contains(re".*\S.*\*\:"):
     return true
-  if line.contains(re".*\S.*\*\["):
+  elif line.contains(re".*\S.*\*\["):
     return true
-  if line.contains(re".*\*\{"):
+  elif line.contains(re".*\*\{"):
     return true
-  return false
+  else:
+    return false
 
 proc formatTop(line: string): bool =
   ## Format top comments
@@ -344,7 +359,7 @@ proc textTop(line: string): bool =
   return true
 
 proc formatCode(line: string) =
-  ## Format the code
+  ## Format the code. E.g. insert "## proc procName"
 
   if contains(lineNew, ".. code-block::") or contains(lineNew, "..code-block::"):
     # Start a code block
@@ -379,7 +394,7 @@ proc formatCode(line: string) =
 
       # Add code
       if codeElement.len() > 0:
-        addToMd("### " & codeElement[0].strip().replace(re"\(.*", ""))
+        addToMd("## " & codeElement[0].strip().replace(re"\(.*", ""))
         addToMd("```nim")
         for i, h in codeElement:
           if i == 0:
@@ -416,18 +431,46 @@ proc textCode(line: string): bool =
     addToMd("")
     codeFirstRun = false
 
+
+  # If import
+  if line.substr(0, 5) == "import" or (line.substr(0,3) == "from" and line.contains("import")):
+    importActive = true
+
+    # Check if line is single "import" statement
+    if line.replace("import").strip() == "":
+      return false
+
+    # Otherwise add package
+    # If it's clean import:
+    if line.substr(0, 5) == "import":
+      mdImport.add("* " & line.replace("import").strip())
+    # If it's a partial import
+    else:
+      mdImport.add("* " & line.strip())
+    return false
+
+  # If it's a multiline import statement include them
+  if importActive and line.substr(0,1) == "  " and isAlphaAscii(line.substr(2,2)):
+    mdImport.add("* " & line.replace(",", "").strip())
+    if "," notin line:
+      importActive = false
+    return false
+  elif importActive and line == "":
+    importActive = false
+    return false
+
+
   # Check if global is required
   if globalOnly and not globalActive:
     if not isGlobal(line): #not line.contains(re"\S.*\*"):
       return false
 
-  if line.substr(0, 5) == "import":
-    mdImport.add(line.strip())
-    return false
 
+  # If include
   if line.substr(0, 6) == "include":
     mdInclude.add(line.strip())
     return false
+
 
   # Check line has 2xhashtag
   if contains(line, " ##"):
@@ -449,7 +492,7 @@ proc textCode(line: string): bool =
       discard isElement(line)
       addToMd("")
       # Clean heading with =, : and {
-      addToMd("### " & (line.multiReplace([(re"\=.*", ""), (re"\:.*", ""), (re"\{.*", "")])).strip())
+      addToMd("## " & (line.multiReplace([(re"\=.*", ""), (re"\:.*", ""), (re"\{.*", "")])).strip())
       addToMd("```nim")
       addToMd(line.replace(re"##.*", "").strip())
       addToMd("```")
@@ -480,7 +523,7 @@ proc textCode(line: string): bool =
         if codeBlockOpen:       # TEST
           addToMd("```")        # TEST
           codeBlockOpen = false # TEST
-        addToMd("### " & codeElement[0].strip().replace(re"\(.*", ""))
+        addToMd("## " & codeElement[0].strip().replace(re"\(.*", ""))
         addToMd("```nim")
         for i, h in codeElement:
           if i == 0:
@@ -544,29 +587,32 @@ proc generateMarkdown(): string =
     result.add("# Include\n")
     for line in mdInclude:
       result.add(line & "\n\n")
-  result.add("# Types\n")
+  if mdCodeType.len() > 0:
+    result.add("# Types\n")
+    for line in mdCodeType:
+      result.add(line & "\n")
   if mdCodeProc.len() > 0:
-    result.add("## Procs\n")
+    result.add("# Procs\n")
     for line in mdCodeProc:
       result.add(line & "\n")
   if mdCodeTemplate.len() > 0:
-    result.add("## Templates\n")
+    result.add("# Templates\n")
     for line in mdCodeTemplate:
       result.add(line & "\n")
   if mdCodeMacro.len() > 0:
-    result.add("## Macros\n")
+    result.add("# Macros\n")
     for line in mdCodeMacro:
       result.add(line & "\n")
   if mdCodeIterator.len() > 0:
-    result.add("## Iterators\n")
+    result.add("# Iterators\n")
     for line in mdCodeIterator:
       result.add(line & "\n")
   if mdCodeFunc.len() > 0:
-    result.add("## Funcs\n")
+    result.add("# Funcs\n")
     for line in mdCodeFunc:
       result.add(line & "\n")
   if mdCodeOther.len() > 0:
-    result.add("## Other\n")
+    result.add("# Other\n")
     for line in mdCodeOther:
       result.add(line & "\n")
 
@@ -581,24 +627,26 @@ proc generateMarkdownSeq(): seq[string] =
   if mdInclude.len() > 0:
     md.add("# Include\n")
     md.add(mdInclude)
-  md.add("# Types\n")
+  if mdCodeType.len() > 0:
+    md.add("# Type\n")
+    md.add(mdCodeType)
   if mdCodeProc.len() > 0:
-    md.add("## Procs\n")
+    md.add("# Procs\n")
     md.add(mdCodeProc)
   if mdCodeTemplate.len() > 0:
-    md.add("## Templates\n")
+    md.add("# Templates\n")
     md.add(mdCodeTemplate)
   if mdCodeMacro.len() > 0:
-    md.add("## Macros\n")
+    md.add("# Macros\n")
     md.add(mdCodeMacro)
   if mdCodeIterator.len() > 0:
-    md.add("## Iterators\n")
+    md.add("# Iterators\n")
     md.add(mdCodeIterator)
   if mdCodeFunc.len() > 0:
-    md.add("## Funcs\n")
+    md.add("# Funcs\n")
     md.add(mdCodeFunc)
   if mdCodeOther.len() > 0:
-    md.add("## Other\n")
+    md.add("# Other\n")
     md.add(mdCodeOther)
   return md
 
@@ -627,12 +675,15 @@ proc parseNim(filename: string) =
   initMdContainers()
   for line in lines(filename):
     if not fileCheckBasic(line):
+      lineLast = line
       continue
     if not codeIsReached:
       if not textTop(line):
+        lineLast = line
         continue
     else:
       if not textCode(line):
+        lineLast = line
         continue
   appendLastLine()
 
