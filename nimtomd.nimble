@@ -1,7 +1,7 @@
 # Package
-version       = "0.2.1"
+version       = "0.3.0"
 author        = "ThomasTJdev"
-description   = "Convert Nim code and files to Markdown"
+description   = "Convert Nim files to markdown"
 license       = "MIT"
 srcDir        = "src"
 installExt    = @["nim"]
@@ -9,4 +9,4 @@ bin           = @["nimtomd"]
 
 
 # Dependencies
-requires "nim >= 0.19.1"
+requires "nim >= 1.0.4"

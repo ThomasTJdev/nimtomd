@@ -1,6 +1,4 @@
-*# Copyright 2018 - Thomas T. Jarløv*
-
-# Nim to Markdown
+## Nim to Markdown
 
 *Generated with [Nim to Markdown](https://github.com/ThomasTJdev/nimtomd)*
 
@@ -13,106 +11,54 @@ comments, or you can include everything.
 The package is *hybrid* which means, it can run as binary
 but also be imported into your project.
 
-## Usage:
-```
- nimtomd [options] <filename>
-```
-
-
-## Options:
-```
- filename.nim    File to output in Markdown
- -h, --help                Shows the help menu
- -o:, --output:[filename]  Outputs the markdown to a file
- -ow, --overwrite          Allow to overwrite a existing md file
- -g, --global              Only include global elements (*)
+# Usage:
+```nim
+nimtomd [options] <filename>
 ```
 
+# Options:
+```nim
+Options:
+<filename>                Nim-file to convert into markdown
+-h,  --help               Shows the help menu
+-o:, --output:[filename]  Outputs the markdown to a file
+-ow, --overwrite          Allow to overwrite a existing md file
+-g,  --onlyglobals        Only include global elements (*)
+-sh                       Skip headings
+-si                       Skip imports
+-st                       Skip types
+-il, --includelines       Include linenumbers
+-ic, --includeconst       Include const
+-il, --includelet         Include let
+-iv, --includevar         Include var
+```
 
-# Requirements
 
-Your code needs to follow the Nim commenting style. Checkout the
+## Requirements
+
+Your code needs to follow the Nim coding style. Checkout the
 source file for examples.
 
 
-# Examples
+## Examples
 
 This README.md is made with ``nimtomd`` with the command:
-```
- nimtomd -o:README.md -ow -global nimtomd.nim
+```nim
+nimtomd -o:README.md -ow -g nimtomd.nim
 ```
 
-
-## Output to screen
+# Output to screen
 
 This prints the Markdown output to the screen:
-```
- nimtomd filename.nim
+```nim
+nimtomd filename.nim
 ```
 
-
-## Save output to file
+# Save output to file
 
 You can force ``nimtomd`` to overwrite an existing file
 by using the option ``-ow``.
 
-```
- nimtomd -o:README.md filename.nim
-```
-
-
-## Import nimtomd
-
-When importing nimtomd to your project, you can pass
-Nim code as a string or by pointing to a file.
-
-You can get the Markdown in either a seq[string] or string.
-The proc's are documented in the "Types -> Proc's" section.
-loop through.
-
-**Parse file**
 ```nim
- import nimtomd
- let md = parseNimFileSeq("filename.nim")
- for line in md:
-   echo line
+nimtomd -o:README.md -ow filename.nim
 ```
-
-
- **Parse string**
-```nim
- import nimtomd
- let myNimCode = """
-   proc special*(data: string): string =
-     ## Special proc
-     echo data
-     return "Amen"
- """
-
- let md = parseNimContentString(myNimCode)
- for line in md.split("\n"):
-   echo line
-```
-
-# Types
-## Procs
-### proc parseNimFileString*
-```nim
-proc parseNimFileString*(filename: string): string =
-```
-Loop through file and generate Markdown to string
-### proc parseNimFileSeq*
-```nim
-proc parseNimFileSeq*(filename: string): seq[string] =
-```
-Loop through file and generate Markdown to seq[string]
-### proc parseNimContentString*
-```nim
-proc parseNimContentString*(content: string): string =
-```
-Loop through string and generate Markdown to string
-### proc parseNimContentSeq*
-```nim
-proc parseNimContentSeq*(content: string): seq[string] =
-```
-Loop through string and generate Markdown to seq[string]

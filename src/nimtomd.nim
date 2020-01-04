@@ -1,4 +1,3 @@
-# Copyright 2018 - Thomas T. Jarløv
 ## Nim to Markdown
 ## ---------------
 ##
@@ -20,17 +19,26 @@
 ##
 ## Options:
 ## ========
-## ..code-block::plain
-##    filename.nim    File to output in Markdown
-##    -h, --help                Shows the help menu
-##    -o:, --output:[filename]  Outputs the markdown to a file
-##    -ow, --overwrite          Allow to overwrite a existing md file
-##    -g, --global              Only include global elements (*)
+## .. code-block::plain
+##    Options:
+##      <filename>                Nim-file to convert into markdown
+##      -h,  --help               Shows the help menu
+##      -o:, --output:[filename]  Outputs the markdown to a file
+##      -ow, --overwrite          Allow to overwrite a existing md file
+##      -g,  --onlyglobals        Only include global elements (*)
+##      -sh                       Skip headings
+##      -si                       Skip imports
+##      -st                       Skip types
+##      -il, --includelines       Include linenumbers
+##      -ic, --includeconst       Include const
+##      -il, --includelet         Include let
+##      -iv, --includevar         Include var
+##
 ##
 ## Requirements
 ## ------------
 ##
-## Your code needs to follow the Nim commenting style. Checkout the
+## Your code needs to follow the Nim coding style. Checkout the
 ## source file for examples.
 ##
 ##
@@ -39,7 +47,7 @@
 ##
 ## This README.md is made with ``nimtomd`` with the command:
 ## .. code-block::plain
-##    nimtomd -o:README.md -ow -global nimtomd.nim
+##    nimtomd -o:README.md -ow -g nimtomd.nim
 ##
 ## Output to screen
 ## ================
@@ -55,700 +63,936 @@
 ## by using the option ``-ow``.
 ##
 ## .. code-block::plain
-##    nimtomd -o:README.md filename.nim
+##    nimtomd -o:README.md -ow filename.nim
 ##
-## Import nimtomd
-## ===================
-##
-## When importing nimtomd to your project, you can pass
-## Nim code as a string or by pointing to a file.
-##
-## You can get the Markdown in either a seq[string] or string.
-## The proc's are documented in the "Types -> Proc's" section.
-## loop through.
-##
-## **Parse file**
-## .. code-block::Nim
-##    import nimtomd
-##    let md = parseNimFileSeq("filename.nim")
-##    for line in md:
-##      echo line
-##
-## **Parse string**
-## .. code-block::Nim
-##    import nimtomd
-##    let myNimCode = """
-##      proc special*(data: string): string =
-##        ## Special proc
-##        echo data
-##        return "Amen"
-##    """
-##
-##    let md = parseNimContentString(myNimCode)
-##    for line in md.split("\n"):
-##      echo line
 
-import os, strutils, re, terminal
 
-const
-  nimtomd = """
-nimtomd: Convert Nim comments to Markdown
 
-nimtomd [options] filename"""
+import strutils, re, os, terminal, algorithm
 
-  help = """
-nimtomd converts a Nim files comments to Markdown
+from times import epochTime
+
+
+type
+  CodeText = object
+    data: seq[string]
+
+  CodeImport = object
+    data: seq[tuple[line: int, global: bool, newline: bool, code: string]]
+
+  CodeFrom = object
+    data: seq[tuple[line: int, global: bool, newline: bool, code: string]]
+
+  CodeType = object
+    data: seq[tuple[line: int, global: bool, newline: bool, heading: string, comment: string, code: string]]
+
+  CodeTemplate = object
+    data: seq[tuple[line: int, global: bool, heading: string, comment: string, code: string, runnable: string]]
+
+  CodeMacro = object
+    data: seq[tuple[line: int, global: bool, heading: string, comment: string, code: string, runnable: string]]
+
+  CodeProc = object
+    data: seq[tuple[line: int, global: bool, heading: string, comment: string, code: string, runnable: string]]
+
+  CodeFunc = object
+    data: seq[tuple[line: int, global: bool, heading: string, comment: string, code: string, runnable: string]]
+
+  CodeIterator = object
+    data: seq[tuple[line: int, global: bool, heading: string, comment: string, code: string, runnable: string]]
+
+  CodeConst = object
+    data: seq[tuple[line: int, global: bool, heading: string, comment: string, code: string]]
+
+  CodeLet = object
+    data: seq[tuple[line: int, global: bool, heading: string, comment: string, code: string]]
+
+  CodeVar = object
+    data: seq[tuple[line: int, global: bool, heading: string, comment: string, code: string]]
+
+
+var
+  codeText: CodeText
+  codeImport: CodeImport
+  codeFrom: CodeFrom
+  codeType: CodeType
+  codeTemplate: CodeTemplate
+  codeMacro: CodeMacro
+  codeProc: CodeProc
+  codeFunc: CodeFunc
+  codeIterator: CodeIterator
+  codeConst: CodeConst
+  codeLet: CodeLet
+  codeVar: CodeVar
+
+var
+  lineForce: int      ## Force to a new line, if `forceNewLine=true`
+  forceNewLine: bool  ## Can force the parser to a new line
+  hasAnyData: bool    ## Used to check, if theres any data available
+
+
+
+
+proc checkElement(line: string): string =
+  ## Check if line has an element and return the element type
+  if line.substr(0, 3) == "proc":
+    return "proc"
+  elif line.substr(0, 7) == "template":
+    return "template"
+  elif line.substr(0, 4) == "macro":
+    return "macro"
+  elif line.substr(0, 7) == "iterator":
+    return "iterator"
+  elif line.substr(0, 3) == "func":
+    return "func"
+  elif line.substr(0, 3) == "type":
+    return "type"
+  elif line.substr(0, 5) == "import":
+    return "import"
+  elif line.substr(0,3) == "from" and line.contains("import"):
+    return "from"
+  elif line.substr(0,4) == "const":
+    return "const"
+  elif line.substr(0,2) == "var":
+    return "var"
+  elif line.substr(0,2) == "let":
+    return "let"
+  else:
+    return ""
+
+
+proc isGlobal(line: string): bool =
+  ## Check if line has global identifier
+  if line.contains(re".*\S.*\*\("):     #bla*(
+    return true
+  elif line.contains(re".*\S.*\*\:"):   #bla*:
+    return true
+  elif line.contains(re".*\S.*\*\["):   #bla*[
+    return true
+  elif line.contains(re".*\*\{"):       #bla*{
+    return true
+  else:
+    return false
+
+
+proc fillElement(element: string, headLineNr: int, isGlobal: bool, head, comment, code, runnable: string) =
+  ## Fill an element
+
+  case element
+  of "template":
+    codeTemplate.data.add((headLineNr, isGlobal, head, comment, code, runnable))
+  of "macro":
+    codeMacro.data.add((headLineNr, isGlobal, head, comment, code, runnable))
+  of "proc":
+    codeProc.data.add((headLineNr, isGlobal, head, comment, code, runnable))
+  of "func":
+    codeFunc.data.add((headLineNr, isGlobal, head, comment, code, runnable))
+  of "iterator":
+    codeIterator.data.add((headLineNr, isGlobal, head, comment, code, runnable))
+  else:
+    styledWriteLine(stderr, fgRed, "ERROR: ", resetStyle, "Could not fill " & element)
+    return
+
+  hasAnyData = true
+
+
+proc fillVariable(element: string, headLineNr: int, isGlobal: bool, head, comment, code: string) =
+  ## Fill an element
+
+  case element
+  of "const":
+    codeConst.data.add((headLineNr, isGlobal, head, comment, code))
+  of "let":
+    codeLet.data.add((headLineNr, isGlobal, head, comment, code))
+  of "var":
+    codeVar.data.add((headLineNr, isGlobal, head, comment, code))
+  else:
+    styledWriteLine(stderr, fgRed, "ERROR: ", resetStyle, "Could not fill " & element)
+    return
+
+  hasAnyData = true
+
+
+proc parseVariable(elementValue: string, lineCurrentNr: int, file: seq[string]) =
+  ## Parse a const, var or let
+
+  var
+    head: string
+    comment: string
+    code: string
+    headLineNr: int
+    isGlobal: bool
+
+  for lineNr in countup(lineCurrentNr, file.len()-1):
+    let line = file[lineNr].strip()
+    if line == elementValue:
+      if head != "":
+        fillVariable(elementValue, headLineNr, isGlobal, head, comment, code)
+        head = ""
+        comment = ""
+        code = ""
+        headLineNr = 0
+        isGlobal = false
+      continue
+    elif line == "":
+      fillVariable(elementValue, headLineNr, isGlobal, head, comment, code)
+      head = ""
+      comment = ""
+      code = ""
+      headLineNr = 0
+      isGlobal = false
+      if file[lineNr+1] == "" or file[lineNr+1].substr(0,1) != "  ":# and file[lineNr+1].substr(0,1) :
+        forceNewLine = true
+        lineForce    = lineNr
+        break
+      continue
+    elif head != "" and file[lineNr].substr(0,2) != "   " and "#" notin file[lineNr].substr(0,2):
+      fillVariable(elementValue, headLineNr, isGlobal, head, comment, code)
+      head = ""
+      comment = ""
+      code = ""
+      headLineNr = 0
+      isGlobal = false
+
+    if line.contains("##"):
+      if line.replace(re"##.*", "") == "":
+        let lineComm = line.replace("##", "").strip()
+        if comment != "":
+          comment.add("\n")
+        comment.add(lineComm)
+      else:
+        let lineHead = line.replace(re"##.*", "").replace(elementValue, "").strip()
+        let lineComm = line.replace(re".*##", "").strip()
+        if comment != "":
+          comment.add("\n")
+        comment.add(lineComm)
+        head.add(lineHead.replace(re"=.*", ""))
+        code.add(lineHead)
+        headLineNr = lineNr
+        isGlobal = if line.contains("*"): true else: false
+
+    else:
+      let lineClean = line.replace(elementValue, "").strip()
+      head.add(lineClean.replace(re"=.*", ""))
+      code.add(lineClean)
+      headLineNr = lineNr
+      isGlobal = if line.contains("*"): true else: false
+
+
+
+proc parseElement(elementValue: string, lineCurrentNr: int, file: seq[string]) =
+  ## Parse `template`
+
+  var
+    isRunning: bool
+    isGlobal: bool
+    isRunnableExample: bool
+    headLineNr: int
+    head: string
+    comment: string
+    code: string
+    codeblock: bool
+    runnable: string
+
+  for lineNr in countup(lineCurrentNr, file.len()-1):
+    let line = file[lineNr].strip()
+    let element = checkElement(file[lineNr]) # Do not pass a strip(), then it'll find it as a let element.
+
+    # If a new element was found or line is empty, exit the parser
+    if (element != elementValue and element != "") or line == "":
+      forceNewLine = true
+      lineForce    = lineNr
+      if isRunning:
+        fillElement(elementValue, headLineNr, isGlobal, head, comment, code, runnable)
+      break
+
+    # Heading
+    if element == elementValue:
+      if isRunning:
+        fillElement(elementValue, headLineNr, isGlobal, head, comment, code, runnable)
+
+      if line.contains("##"):
+        comment = line.replace(re".*##\s", "").strip()
+
+      isRunning   = true
+      isGlobal   = isGlobal(line)
+      headLineNr = lineNr + 1 # Adding +1 since fileread starts from 0
+      head       = line.replace(re"\(.*", "").replace("proc", "").strip() # anyNonWord# blabla
+      code       = line.replace(re"#.*", "").strip()
+      continue
+
+    elif codeblock and line.substr(0,4) == "##   " and line.replace("##", "") != "":
+      comment.add(line.replace("##  ", "") & "\n")
+
+
+    elif line.substr(0,1) == "##":
+      if line.contains(".. code-block::"):
+        codeblock = true
+        comment.add("\n")
+        comment.add("```nim")
+        comment.add("\n")
+        continue
+
+      if codeblock and file[lineNr-1].contains(".. code-block::"):
+        continue
+
+      if codeblock:
+        comment.add("```")
+        comment.add("\n")
+      codeblock = false
+
+      var comm = line.replace(re".*##\s", "").replace("##", "").strip()
+      var isLink = comm.replace(re".*\<", "").replace(re"\>`_.*", "")
+
+      # HTML link
+      if isLink != "" and isLink.substr(isLink.len()-5, isLink.len()) == ".html":
+        let link = " [(link)](https://nim-lang.org/docs/" & isLink & ")"
+        comm = comm.replace("<" & isLink & ">`_", link).replace("`", "")
+
+      # Insert new line
+      if comment.len() != 0:
+        comment.add(" ")
+
+      if line == "## See also:":
+        comment.add("\n\n" & comm)
+      elif line.substr(0, 3) == "## *":
+        comment.add("\n" & comm)
+      elif comm == "":
+        comment.add("\n\n")
+      else:
+        comment.add(comm)
+
+    elif line == "runnableExamples:" or isRunnableExample:
+      isRunnableExample = true
+      if line == "runnableExamples:" or file[lineNr].substr(0,3) == "    ":
+        if runnable != "":
+          runnable.add("\n")
+        runnable.add(file[lineNr])
+
+
+    elif line.substr(line.len()-1, line.len()-1) == "=":
+      code.add(" " & line)
+
+
+
+proc parseType(lineCurrentNr: int, file: seq[string]) =
+  ## Parse `type` statements.
+
+  var
+    typeIsRunning: bool
+    typeIsGlobal: bool
+    typeHeadLineNr: int
+    typeHead: string
+    typeComment: string
+    typeCode: string
+
+  for lineNr in countup(lineCurrentNr, file.len()-1):
+    let line = file[lineNr].strip()
+    let element = checkElement(line)
+
+    # Empty line continue
+    if line == "" or line == "type":
+      continue
+
+    # If a new element was found, exit the parser
+    if element != "type" and element != "":
+      forceNewLine = true
+      lineForce    = lineNr
+      if typeIsRunning:
+        codeType.data.add((typeHeadLineNr, typeIsGlobal, true, typeHead, typeComment, typeCode))
+        hasAnyData = true
+      break
+
+    # Get heading - indent = 2
+    if file[lineNr].substr(0,1) == "  " and isAlphaNumeric(file[lineNr].substr(2,2)):
+      # Code check
+      if isLowerAscii(file[lineNr][2]):
+        styledWriteLine(stderr, fgRed, "ERROR: ", resetStyle, "Type is starting with a lower ASCII: " & line)
+
+      # Check if a new type is found
+      if typeIsRunning:
+        # ADD type
+        codeType.data.add((typeHeadLineNr, typeIsGlobal, true, typeHead, typeComment, typeCode))
+        hasAnyData = true
+        typeHead    = ""
+        typeComment = ""
+        typeCode    = ""
+
+      if file[lineNr].contains("##"):
+        typeComment = line.replace(re".*##\s", "").strip()
+
+      typeIsRunning  = true
+      typeIsGlobal   = if file[lineNr].contains("*"): true else: false
+      typeHeadLineNr = lineNr + 1 # Adding +1 since fileread starts from 0
+      typeHead       = line.replace(re"\W#\s.*", "").strip() # anyNonWord# blabla
+      typeCode       = "  " & line.replace(re"#.*", "").strip() # First line (object), strip comment
+      continue
+
+    # Check if multiline comment is present for head
+    if line.substr(0, 1) == "##":
+      typeComment.add(" " & line.replace("##", "").strip)
+      continue
+
+    # Get items - indent = 4
+    if file[lineNr].substr(0,3) == "    " and isAlphaNumeric(file[lineNr].substr(4,4)):
+      let cleanCode = file[lineNr].replace(re"\W#\s.*", "")
+
+      # Check if comment is present
+      if file[lineNr].contains("##"):
+
+        # Head comment is already present, insert new line
+        if typeComment.len() != 0:
+          typeComment.add("\n\n")
+
+        typeComment.add("* __" & cleanCode.strip() & "__: " & line.replace(re".*##\s", "").strip())
+        hasAnyData = true
+
+      typeCode.add("\n" & cleanCode)
+      continue
+
+
+proc parseFrom(lineCurrentNr: int, file: seq[string]) =
+  ## Parse `from xx import yy` statements.
+  ##
+  ## `lineNr` contains "from" and "import".
+  ##
+  ## Does not support multiline comments
+
+  for lineNr in countup(lineCurrentNr, file.len()-1):
+    let line = file[lineNr].strip()
+    let lineRaw = file[lineNr]
+    let element = checkElement(line)
+
+    # If a new element was found, exit the parser
+    if (element != "from" and element != "") or line == "":
+      forceNewLine = true
+      lineForce    = lineNr
+      break
+
+    # Add data
+    # Always new lines, due to to long lines otherwise
+    if lineRaw.substr(0,1) == "##" or lineRaw.substr(0,1) == "# " or line.substr(0,1) == "##" or line.substr(0,1) == "# ":# or (lineRaw.substr(0,3) != "from" and lineRaw.substr(0,1) != "  "):
+      continue
+
+    # Strip line, so inside code comments is gone.
+    let lineClean = line.strip()
+    var data: string
+    if line.contains("##"):
+      data = replace(lineClean, "##", ":").strip() # space#space*
+    elif line.contains("#"):
+      data = replace(lineClean, re"\s#\s.*", "").strip() # space#space*
+    else:
+      data = lineClean
+
+    # If its global, add global bool
+    # Baah - imports should not be global"
+    if line.contains("*"):
+      codeFrom.data.add((lineNr, true, true, data))
+      hasAnyData = true
+      styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "You have an import from set as a global..: " & line)
+    # Add as normal
+    else:
+      codeFrom.data.add((lineNr, false, true, "* " & data))
+      hasAnyData = true
+
+
+
+proc parseImport(lineCurrentNr: int, file: seq[string]) =
+  ## Parse `import xx` statements.
+  ##
+  ## `lineNr` contains "import".
+  ##
+  ## Does not support multiline comments
+  for lineNr in countup(lineCurrentNr, file.len()-1):
+    let line = file[lineNr].strip()
+    let element = checkElement(line)
+
+    # Empty line continue
+    if line == "import":
+      continue
+
+    # If a new element was found, exit the parser
+    if (element != "import" and element != "") or line == "":
+      forceNewLine = true
+      lineForce    = lineNr
+      break
+
+    # Check for multiline comment
+    if line.substr(0,1) == "##" or line.substr(0,0) == "#":
+      continue
+
+    # Add data
+    # If line contains comments, specify it as a new line
+    var newline = if line.contains("##"): true else: false
+
+    # Strip line, so inside code comments is gone.
+    let lineClean = line.replace(re"import\s", "").replace(",", "").strip()
+    var data: string
+    if not newline:
+      data = "* " & lineClean.split(" ")[0].strip()
+    else:
+      data = "* " & replace(lineClean, re"\s.#", ": ").strip()
+
+    # If its global, add global bool
+    # Baah - imports should not be global"
+    if line.contains("*"):
+      codeImport.data.add((lineNr, true, newline, data))
+      hasAnyData = true
+      styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "You have an import from set as a global..: " & line)
+    # Add as normal
+    else:
+      codeImport.data.add((lineNr, false, newline, data))
+      hasAnyData = true
+
+
+proc parseCodeText(lineCurrentNr: int, file: seq[string]) =
+  ## Parse text inside code. E.g. intro text etc.
+  var skipNextLine: bool
+  var codeRunning: bool
+
+  for lineNr in countup(lineCurrentNr, file.len()-1):
+
+    # If we already have taken next lines header, then skip the header line.
+    # Only used on === and ----
+    if skipNextLine:
+      skipNextLine = false
+      continue
+
+    let line = file[lineNr].strip()
+
+    # Check if next line is a code - if we're currently inserting code
+    if (line == "" or line.substr(0,1) == "# " or line == "#") and codeRunning:
+      codeRunning = false
+      codeText.data.add("```")
+
+    # Empty line continue
+    if (line == "" or line.substr(0,1) == "# " or line == "#"):
+      # If the next line does not have a comment, then break
+      if file[lineNr+1].substr(0,1) != "##" or file[lineNr+1].substr(0,1) != "# ":
+        forceNewLine = true
+        lineForce    = lineNr
+        break
+
+      continue
+
+    # If this is a code block
+    if line.contains(".. code-block::") or codeRunning:
+      codeRunning = true
+      let lineClean = line.substr(2, line.len())
+      let nextLine = file[lineNr+1].substr(2, file[lineNr+1].len())
+      let nextNextLine = file[lineNr+2].substr(2, file[lineNr+2].len())
+
+      # If we are coming to an end with the code block
+      if lineClean.strip() == "" and nextLine.substr(0, 1) != "  " and nextNextLine.substr(0, 1) != "  ":
+        codeRunning = false
+        codeText.data.add("```")
+
+      # Code block start
+      if line.contains(".. code-block::"):
+        codeText.data.add("```nim")
+      # Code block code
+      else:
+        codeText.data.add(lineClean.strip())
+
+    # Normal text
+    else:
+      # Check the headings
+      let nextLine = file[lineNr+1].substr(2, file[lineNr+1].len()).strip()
+      var heading: string
+      if nextLine.contains("==="):           #H1
+        skipNextLine = true
+        heading = "# "
+      elif nextLine.substr(0,0) == "#":      #H1
+        heading = "# "
+      elif nextLine.contains("---"):         #H2
+        skipNextLine = true
+        heading = "## "
+      elif nextLine.substr(0,1) == "##":     #H2
+        heading = "## "
+      elif nextLine.substr(0,2) == "###":    #H3
+        heading = "### "
+      elif nextLine.substr(0,3) == "####":   #H4
+        heading = "#### "
+      elif nextLine.substr(0,4) == "#####":  #H5
+        heading = "##### "
+      elif nextLine.substr(0,5) == "######": #H6
+        heading = "###### "
+
+      # Insert text
+      codeText.data.add(heading & line.replace("#", "").strip())
+
+
+
+proc parseLine(lineNr: int, file: seq[string]) =
+  ## Parse the current line. If a `proc` or other element is spottet, the
+  ## parser will continue until it is parsed, and push a new line the reader.
+
+  # Check element
+  let element = checkElement(file[lineNr])
+
+  # If this is first run and main text is coming
+  if element == "" and not hasAnyData and (file[lineNr].substr(0,1) == "##" or file[lineNr].substr(0,1) == "# "):
+    parseCodeText(lineNr, file)
+    return
+
+  # If this is inside code
+  elif element == "":
+    return
+
+  # If an element was found, parse it
+  case element
+  of "import":
+    parseImport(lineNr, file)
+  of "from":
+    parseFrom(lineNr, file)
+  of "type":
+    parseType(lineNr, file)
+  of "template":
+    parseElement("template", lineNr, file)
+  of "macro":
+    parseElement("macro", lineNr, file)
+  of "proc":
+    parseElement("proc", lineNr, file)
+  of "func":
+    parseElement("func", lineNr, file)
+  of "iterator":
+    parseElement("iterator", lineNr, file)
+  of "const":
+    parseVariable("const", lineNr, file)
+  of "let":
+    parseVariable("let", lineNr, file)
+  of "var":
+    parseVariable("var", lineNr, file)
+  else:
+    echo element
+
+  return
+
+
+proc generateMarkdown(onlyGlobals, includeHeadings, includeImport, includeTypes, includeLines, includeConst, includeLet, includeVar: bool): seq[string] =
+  var data: seq[string]
+
+  # Code text
+  if codeText.data.len() > 0:
+    for i in codeText.data:
+      data.add(i)
+
+
+  # Import
+  if includeImport and (codeImport.data.len() > 0 or codeFrom.data.len() > 0):
+    data.add("# Imports\n")
+
+    for i in codeImport.data.sortedByIt(it.code):
+      for n in split(i.code, "\n"):
+        data.add(n)
+
+    data.add("\n")
+
+    for i in codeFrom.data.sortedByIt(it.code):
+      for n in split(i.code, "\n"):
+        data.add(n)
+
+    data.add("\n")
+
+
+  # Types
+  if includeTypes and codeType.data.len() > 0:
+    data.add("# Types\n")
+    for i in codeType.data:
+      if onlyGlobals:
+        if not i.global: continue
+
+      if includeHeadings:
+        data.add("## " & i.heading & "\n")
+      for n in split(i.comment, "\n"):
+        data.add(n)
+      data.add("```nim")
+      for n in split(i.code, "\n"):
+        data.add(n)
+      data.add("```\n")
+      data.add("____\n")
+      data.add("\n")
+
+
+  # Const
+  if includeConst and codeConst.data.len() > 0:
+    data.add("# Const\n")
+    for i in codeConst.data:
+      if onlyGlobals:
+        if not i.global: continue
+
+      if includeHeadings:
+        data.add("## " & i.heading & "\n")
+      data.add("```nim")
+      data.add(i.code)
+      data.add("```\n")
+      for n in split(i.comment, "\n"):
+        data.add(n)
+      data.add("____\n")
+      data.add("\n")
+
+
+  # Let
+  if includeLet and codeLet.data.len() > 0:
+    data.add("# Let\n")
+    for i in codeLet.data:
+      if onlyGlobals:
+        if not i.global: continue
+
+      if includeHeadings:
+        data.add("## " & i.heading & "\n")
+      data.add("```nim")
+      data.add(i.code)
+      data.add("```\n")
+      for n in split(i.comment, "\n"):
+        data.add(n)
+      data.add("____\n")
+      data.add("\n")
+
+
+  # Var
+  if includeVar and codeVar.data.len() > 0:
+    data.add("# Var\n")
+    for i in codeVar.data:
+      if onlyGlobals:
+        if not i.global: continue
+
+      if includeHeadings:
+        data.add("## " & i.heading & "\n")
+      data.add("```nim")
+      data.add(i.code)
+      data.add("```\n")
+      for n in split(i.comment, "\n"):
+        data.add(n)
+      data.add("____\n")
+      data.add("\n")
+
+
+  # Procs
+  if codeProc.data.len() > 0:
+    data.add("# Procs\n")
+    for i in codeProc.data:
+      if onlyGlobals:
+        if not i.global: continue
+
+      if includeHeadings:
+        data.add("## " & i.heading & "\n")
+      data.add("```nim")
+      data.add(i.code)
+      data.add("```\n")
+      if includeLines:
+        data.add("Line: " & $i.line & "\n")
+      data.add(i.comment)
+      data.add("\n")
+      if i.runnable != "":
+        #data.add("__Runnable example:__")
+        data.add("```nim")
+        for r in i.runnable.split("\n"):
+          data.add(r.substr(2, r.len()))
+        data.add("```\n")
+      data.add("____\n")
+
+
+  # Templates
+  if codeTemplate.data.len() > 0:
+    data.add("# Templates\n")
+    for i in codeTemplate.data:
+      if onlyGlobals:
+        if not i.global: continue
+
+      if includeHeadings:
+        data.add("## " & i.heading & "\n")
+      data.add("```nim")
+      data.add(i.code)
+      data.add("```\n")
+      if includeLines:
+        data.add("Line: " & $i.line & "\n")
+      data.add(i.comment)
+      data.add("\n")
+      if i.runnable != "":
+        #data.add("__Runnable example:__")
+        data.add("```nim")
+        for r in i.runnable.split("\n"):
+          data.add(r.substr(2, r.len()))
+        data.add("```\n")
+      data.add("____\n")
+
+
+  # Macros
+  if codeMacro.data.len() > 0:
+    data.add("# Macros\n")
+    for i in codeMacro.data:
+      if onlyGlobals:
+        if not i.global: continue
+
+      if includeHeadings:
+        data.add("## " & i.heading & "\n")
+      data.add("```nim")
+      data.add(i.code)
+      data.add("```\n")
+      if includeLines:
+        data.add("Line: " & $i.line & "\n")
+      data.add(i.comment)
+      data.add("\n")
+      if i.runnable != "":
+        #data.add("__Runnable example:__")
+        data.add("```nim")
+        for r in i.runnable.split("\n"):
+          data.add(r.substr(2, r.len()))
+        data.add("```\n")
+      data.add("____\n")
+
+
+  # Func
+  if codeFunc.data.len() > 0:
+    data.add("# Funcs\n")
+    for i in codeFunc.data:
+      if onlyGlobals:
+        if not i.global: continue
+
+      if includeHeadings:
+        data.add("## " & i.heading & "\n")
+      data.add("```nim")
+      data.add(i.code)
+      data.add("```\n")
+      if includeLines:
+        data.add("Line: " & $i.line & "\n")
+      data.add(i.comment)
+      data.add("\n")
+      if i.runnable != "":
+        #data.add("__Runnable example:__")
+        data.add("```nim")
+        for r in i.runnable.split("\n"):
+          data.add(r.substr(2, r.len()))
+        data.add("```\n")
+      data.add("____\n")
+
+
+  # Iterator
+  if codeIterator.data.len() > 0:
+    data.add("# Iterators\n")
+    for i in codeIterator.data:
+      if onlyGlobals:
+        if not i.global: continue
+
+      if includeHeadings:
+        data.add("## " & i.heading & "\n")
+      data.add("```nim")
+      data.add(i.code)
+      data.add("```\n")
+      if includeLines:
+        data.add("Line: " & $i.line & "\n")
+      data.add(i.comment)
+      data.add("\n")
+      if i.runnable != "":
+        #data.add("__Runnable example:__")
+        data.add("```nim")
+        for r in i.runnable.split("\n"):
+          data.add(r.substr(2, r.len()))
+        data.add("```\n")
+      data.add("____\n")
+
+
+  return data
+
+
+proc markdownToFile(filename: string, data: seq[string]) =
+  ## Save markdown to file
+  var markdown: string
+  for md in data:
+    markdown.add(md & "\n")
+
+  try:
+    writeFile(filename, markdown)
+    styledWriteLine(stderr, fgGreen, "OK: ", resetStyle, "Markdown written in: " & filename)
+  except:
+    styledWriteLine(stderr, fgRed, "ERROR: ", resetStyle, "Could not write markdown to file: " & filename)
+
+
+
+proc markdownShow(markdown: seq[string]) =
+  ## Show markdown
+  if markdown.len() == 0:
+    styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
+  else:
+    for line in markdown:
+      echo line
+
+
+proc parseNim(filename: string, onlyGlobals=false, includeHeadings=true, includeImport=true, includeTypes=true, includeLines=false, includeConst=false, includeLet=false, includeVar=false): seq[string] =
+  ## Loop through file and generate Markdown.
+  ##
+  ## We are reading the number of lines, which will help us to jump back and
+  ## forward with more control, than if we just did *for lines in file*.
+
+  # Read file
+  let file = readFile(filename).split("\n")
+  let lines = file.len()
+
+  styledWriteLine(stderr, fgGreen, "OK: ", resetStyle, "Read file: " & filename)
+  styledWriteLine(stderr, fgGreen, "OK: ", resetStyle, "Lines to parse: " & $lines)
+
+  # Loop through all lines
+  for lineNr in countup(0, lines-1):
+    if forceNewLine:
+      if lineNr < lineForce:
+        continue
+      else:
+        forceNewLine = false
+
+    parseLine(lineNr, file)
+
+  # Generate markdown
+  return generateMarkdown(onlyGlobals, includeHeadings, includeImport, includeTypes, includeLines, includeConst, includeLet, includeVar)
+
+
+const help = """
+
+nimtomd converts a Nim files into markdown
 
 Usage:
   nimtomd [options] <filename>
 
 Options:
-  filename.nim              File to output in Markdown
-  -h, --help                Shows the help menu
+  <filename>                Nim-file to convert into markdown
+  -h,  --help               Shows the help menu
   -o:, --output:[filename]  Outputs the markdown to a file
   -ow, --overwrite          Allow to overwrite a existing md file
-  -g, --global              Only include global elements (*)"""
-
-
-var
-  mdTop:seq[string]
-  mdImport:seq[string]
-  mdInclude:seq[string]
-  mdCodeProc:seq[string]
-  mdCodeTemplate:seq[string]
-  mdCodeMacro:seq[string]
-  mdCodeIterator:seq[string]
-  mdCodeFunc:seq[string]
-  mdCodeOther:seq[string]
-  mdCodeType:seq[string]
-
-var
-  lineNew: string
-  lineOld: string
-  firstRun: bool
-  firstComment: bool
-  newBlock: bool
-  copyrightInserted: bool
-  globalOnly: bool
-  globalActive: bool
-  codeElementLast: bool
-  codeElement: seq[string]
-  codeElementSingleLine: bool
-  codeIsReached: bool
-  codeFirstRun: bool
-  codeBlockOpen: bool
-  codeBlockFirstLine: bool
-  activeElement: string
-  lastActiveElement: string
-  importActive: bool
-  lineLast: string
-
-proc addToMd(data: string) =
-  if data.len() == 0:
-    return
-  case activeElement
-  of "proc":
-    mdCodeProc.add(data)
-  of "template":
-    mdCodeTemplate.add(data)
-  of "macro":
-    mdCodeMacro.add(data)
-  of "iterator":
-    mdCodeIterator.add(data)
-  of "func":
-    mdCodeFunc.add(data)
-  of "type":
-    if data == "### type" or data == "## type":
-      return
-    mdCodeType.add(data)
-  else:
-    mdCodeOther.add(data)
-
-proc initMdContainers() =
-  mdTop = @[]
-  mdImport = @[]
-  mdInclude = @[]
-  mdCodeProc = @[]
-  mdCodeTemplate = @[]
-  mdCodeMacro = @[]
-  mdCodeIterator = @[]
-  mdCodeFunc = @[]
-  mdCodeOther = @[]
-  mdCodeType = @[]
-
-  lineNew = ""
-  lineOld = ""
-  firstRun = true
-  firstComment = false
-  newBlock = true
-  copyrightInserted = false
-  globalActive = false
-  codeElementLast = false
-  codeElement = @[]
-  codeElementSingleLine = false
-  codeIsReached = false
-  codeFirstRun = true
-  codeBlockOpen = false
-  codeBlockFirstLine = false
-  activeElement = ""
-  lastActiveElement = ""
-  importActive = false
-
-proc isElement(line: string): bool =
-  ## Check if line has an element
-  if line.contains("#"):
-    activeElement = "other"
-    return false
-  if line.strip().substr(0, 3) == "proc":
-    activeElement = "proc"
-    return true
-  if line.strip().substr(0, 7) == "template":
-    activeElement = "template"
-    return true
-  if line.strip().substr(0, 4) == "macro":
-    activeElement = "macro"
-    return true
-  if line.strip().substr(0, 7) == "iterator":
-    activeElement = "iterator"
-    return true
-  if line.strip().substr(0, 3) == "func":
-    activeElement = "func"
-    return true
-  if line.strip().substr(0, 3) == "type":
-    activeElement = "type"
-    return true
-
-proc isGlobal(line: string): bool =
-  ## Check if line has global identifier
-  if line.contains(re".*\S.*\*\("):
-    return true
-  elif line.contains(re".*\S.*\*\:"):
-    return true
-  elif line.contains(re".*\S.*\*\["):
-    return true
-  elif line.contains(re".*\*\{"):
-    return true
-  else:
-    return false
-
-proc formatTop(line: string): bool =
-  ## Format top comments
-
-  # Check the first line. If it's empty only using
-  # single #, skip it
-  if not firstComment:
-    if line == "" or line.substr(0,1) == "# ":
-      return false
-    else:
-      firstComment = true
-
-  # If a codeblock is open
-  if codeBlockOpen:
-    if contains(lineNew.replace(" ", ""), "..code-block::"):
-      # Check if this is going to be a codeblock
-      if contains(toLowerAscii(lineNew), "plain"):
-        mdTop.add("```")
-        mdTop.add("")
-        mdTop.add("")
-        mdTop.add("```")
-      else:
-        mdTop.add("```")
-        mdTop.add("")
-        mdTop.add("")
-        mdTop.add("```nim")
-
-      codeBlockFirstLine = true
-      codeBlockOpen = true
-
-    elif (replace(line, "#", "").len() >= 1 and line.substr(0,2) != "   ") or
-          (replace(line, "#", "").len() == 0 and replace(lineOld, "#", "").len() == 0):
-      # Close the codeblock of new text is found or if
-      # the last line and current line are blank
-      mdTop.add("```")
-      mdTop.add("")
-      mdTop.add("")
-      mdTop.add(line)
-      codeBlockOpen = false
-
-    else:
-      if codeBlockFirstLine:
-        # If this is the first line in the codeblock
-        codeBlockFirstLine = false
-      else:
-        mdTop.add(lineOld.substr(3, lineOld.len()))
-
-  elif contains(lineNew.replace(" ", ""), "..code-block::"):
-    # Check if this is going to be a codeblock
-    if contains(toLowerAscii(lineNew), "plain"):
-      mdTop.add("```")
-    else:
-      mdTop.add("```nim")
-
-    codeBlockFirstLine = true
-    codeBlockOpen = true
-
-  elif contains(lineNew, "---"):
-    # Make heading H1
-    if mdTop.len() > 0: mdTop.delete(mdTop.len())
-    mdTop.add("#" & lineOld)
-
-  elif contains(lineNew, "===") or contains(lineNew, "^^^"):
-    # Make sub heading H2
-    if mdTop.len() > 0: mdTop.delete(mdTop.len())
-    mdTop.add("##" & lineOld)
-
-  else:
-    # Add line
-    mdTop.add(line.substr(1, line.len()))
-
-  return true
-
-proc fileCheckBasic(line: string): bool =
-  ## Basic check of file
-
-  if line == "when isMainModule:":
-    return false
-
-  if not firstComment:
-    if line.substr(0,1) == "# " and not copyrightInserted and toLowerAscii(line).contains("copyright"):
-      mdTop.add("*" & line & "*")
-      mdTop.add("")
-      copyrightInserted = true
-      return false
-
-    elif line.substr(0,1) == "##":
-      firstComment = true
-      lineOld = line.substr(2, line.len())
-      mdTop.add(line.substr(3, line.len()))
-
-    elif line == "" or line.substr(0,1) == "# " or line.len() == 1:
-      return false
-
-    else:
-      firstComment = true
-
-  # If the code body is reached.
-  # Checked with line = "" (ending of top comment) or line containing alpha.
-  if not codeIsReached and (line == "" or isAlphaAscii(line.strip().substr(0, 1))):
-    codeIsReached = true
-    return true
-  elif line.substr(0, 1) == "# ":
-    return false
-
-  return true
-
-proc textTop(line: string): bool =
-  ## Check the top text
-  if line.substr(0, 1) == "##":
-    lineNew = line.substr(2, line.len())
-
-    if firstRun:
-      firstRun = false
-      return false
-
-    if not formatTop(lineNew):
-      return false
-
-    lineOld = lineNew
-
-  else:
-    if codeBlockOpen:
-      mdTop.add("```")
-      codeBlockOpen = false
-
-  return true
-
-proc formatCode(line: string) =
-  ## Format the code. E.g. insert "## proc procName"
-
-  if contains(lineNew, ".. code-block::") or contains(lineNew, "..code-block::"):
-    # Start a code block
-    if contains(lineNew, "plain") or contains(lineNew, "Plain"):
-      addToMd("```")
-    else:
-      addToMd("```nim")
-    codeBlockFirstLine = true
-    codeBlockOpen = true
-  else:
-    codeElementLast = false
-    if newBlock:
-      discard isElement(line)
-      # Starting a new block
-
-      if globalOnly:
-        # Check if this is global
-        var isGlobal = false
-        for a in codeElement:
-          #if "*(" in a or "*[" in a:
-          if isGlobal(a):
-            isGlobal = true
-            globalActive = true
-            break
-        if not isGlobal:
-          newBlock = false
-          globalActive = false
-          return
-
-      addToMd("") # Add spacing
-
-
-      # Add code
-      if codeElement.len() > 0:
-        addToMd("## " & codeElement[0].strip().replace(re"\(.*", ""))
-        addToMd("```nim")
-        for i, h in codeElement:
-          if i == 0:
-            addToMd(h.strip())
-          else:
-            addToMd(h)
-        addToMd("```")
-        addToMd(line.substr(1, line.len()))
-
-      # Cleanup
-      codeElement = @[]
-      newBlock = false
-
-    else:
-      # Just insert
-      addToMd(line.substr(1, line.len()))
-
-proc textCode(line: string): bool =
-  ## Work with the code text
-
-  # Check if this is a single line comment continued
-  if line.strip().len() == 0:
-    codeElementSingleLine = false
-
-  # If this is first time the code text is reached.
-  if codeFirstRun:
-    # Close open codeblocks from mdTop. codeFirstRun: bool is used to
-    # identify mdTop
-    if codeBlockOpen:
-      mdTop.add(lineNew.substr(3, lineNew.len()))
-      mdTop.add("```")
-      mdTop.add("")
-      codeBlockOpen = false
-    addToMd("")
-    codeFirstRun = false
-
-
-  # If import
-  if line.substr(0, 5) == "import" or (line.substr(0,3) == "from" and line.contains("import")):
-    importActive = true
-
-    # Check if line is single "import" statement
-    if line.replace("import").strip() == "":
-      return false
-
-    # Otherwise add package
-    # If it's clean import:
-    if line.substr(0, 5) == "import":
-      mdImport.add("* " & line.replace("import").strip())
-    # If it's a partial import
-    else:
-      mdImport.add("* " & line.strip())
-    return false
-
-  # If it's a multiline import statement include them
-  if importActive and line.substr(0,1) == "  " and isAlphaAscii(line.substr(2,2)):
-    mdImport.add("* " & line.replace(",", "").strip())
-    if "," notin line:
-      importActive = false
-    return false
-  elif importActive and line == "":
-    importActive = false
-    return false
-
-
-  # Check if global is required
-  if globalOnly and not globalActive:
-    if not isGlobal(line): #not line.contains(re"\S.*\*"):
-      return false
-
-
-  # If include
-  if line.substr(0, 6) == "include":
-    mdInclude.add(line.strip())
-    return false
-
-
-  # Check line has 2xhashtag
-  if contains(line, " ##"):
-  #if contains(line.strip().substr(0,1), "##"):
-    codeElementLast = false
-
-    # Skip TODO's comments
-    # TODO: Should TODO's be visible?
-    if line.contains(re"\S.*## TODO"):
-      return false
-
-    # Single line element and comment
-    # Checks for <alpha 2xhashtag> and <` 2xhashtag>
-    if line.contains(re"\S.*##") or line.contains(re"\`.*##"):
-      #Check if only global is allowed
-      if globalOnly:
-        if not isGlobal(line): #not line.contains(re"\S.*\*"):
-          return false
-      discard isElement(line)
-      addToMd("")
-      # Clean heading with =, : and {
-      addToMd("## " & (line.multiReplace([(re"\=.*", ""), (re"\:.*", ""), (re"\{.*", "")])).strip())
-      addToMd("```nim")
-      addToMd(line.replace(re"##.*", "").strip())
-      addToMd("```")
-      addToMd(line.replace(re".*## ", ""))
-      codeElement = @[]
-      codeElementSingleLine = true
-
-    # Check if single line comment has been active.
-    # This is used for multiple line comments for a single line element
-    elif codeElementSingleLine and line.contains(re".*##\s\S"):
-      addToMd(line.replace(re".*##", ""))
-
-    # New codeblock or comment under element
-    else:
-      codeElementSingleLine = false
-      lineNew = line.replace(re".*##", "")
-      formatCode(lineNew)
-      lineOld = lineNew
-
-  # If line does not contain 2xhashtag
-  else:
-    # Is the line an element
-    if isElement(line):
-      # If codeElement has an element in storage, insert it before adding a new
-      if codeElement.len() > 0:
-        activeElement = lastActiveElement
-
-        if codeBlockOpen:       # TEST
-          addToMd("```")        # TEST
-          codeBlockOpen = false # TEST
-        addToMd("## " & codeElement[0].strip().replace(re"\(.*", ""))
-        addToMd("```nim")
-        for i, h in codeElement:
-          if i == 0:
-            addToMd(h.strip())
-          else:
-            addToMd(h)
-        addToMd("```")
-
-        codeElement = @[]
-
-      discard isElement(line)
-      lastActiveElement = activeElement
-
-      # Check if only global is allowed
-      if globalOnly:
-        if not isGlobal(line): #not line.contains(re"\S.*\*"):
-          return false
-      globalActive = true
-      codeElementLast = true
-
-    if codeElementLast:
-      # check for "): xxx =", "{ xxx } xxx =" = and ") xxx ="
-      if line.contains(re"\)\:.*\=") or line.contains(re"\{.*\}.*\=") or line.contains(re"\).*\=") or line.contains(re"\(.*\).*\{.*\}"):
-        codeElementLast = false
-      codeElement.add(line)
-
-    # If this is an open code block
-    if codeBlockOpen:
-      codeElementLast = false
-
-      # Close code block if open or append
-      if replace(line, "#", "").len() >= 1 and line.substr(0,2) != "   ":
-        addToMd("```")
-        codeBlockOpen = false
-      else:
-        addToMd(line.substr(1, line.len()))
-
-    newBlock = true
-
-proc appendLastLine() =
-  ## When the file is ended and an element is in cache
-  if codeElement.len() > 0:
-    addToMd("### " & codeElement[0].strip().replace(re"\(.*", ""))
-    addToMd("```nim")
-    for i, h in codeElement:
-      if i == 0:
-        addToMd(h.strip())
-      else:
-        addToMd(h)
-    addToMd("```")
-
-proc generateMarkdown(): string =
-  ## Generate markdown to string
-  for line in mdTop:
-    result.add(line & "\n")
-  if mdImport.len() > 0:
-    result.add("# Imports\n")
-    for line in mdImport:
-      result.add(line & "\n\n")
-  if mdInclude.len() > 0:
-    result.add("# Include\n")
-    for line in mdInclude:
-      result.add(line & "\n\n")
-  if mdCodeType.len() > 0:
-    result.add("# Types\n")
-    for line in mdCodeType:
-      result.add(line & "\n")
-  if mdCodeProc.len() > 0:
-    result.add("# Procs\n")
-    for line in mdCodeProc:
-      result.add(line & "\n")
-  if mdCodeTemplate.len() > 0:
-    result.add("# Templates\n")
-    for line in mdCodeTemplate:
-      result.add(line & "\n")
-  if mdCodeMacro.len() > 0:
-    result.add("# Macros\n")
-    for line in mdCodeMacro:
-      result.add(line & "\n")
-  if mdCodeIterator.len() > 0:
-    result.add("# Iterators\n")
-    for line in mdCodeIterator:
-      result.add(line & "\n")
-  if mdCodeFunc.len() > 0:
-    result.add("# Funcs\n")
-    for line in mdCodeFunc:
-      result.add(line & "\n")
-  if mdCodeOther.len() > 0:
-    result.add("# Other\n")
-    for line in mdCodeOther:
-      result.add(line & "\n")
-
-proc generateMarkdownSeq(): seq[string] =
-  ## Generate markdown to seq
-  var md: seq[string] = @[]
-  if mdTop.len() > 0:
-    md.add(mdTop)
-  if mdImport.len() > 0:
-    md.add("# Imports\n")
-    md.add(mdImport)
-  if mdInclude.len() > 0:
-    md.add("# Include\n")
-    md.add(mdInclude)
-  if mdCodeType.len() > 0:
-    md.add("# Type\n")
-    md.add(mdCodeType)
-  if mdCodeProc.len() > 0:
-    md.add("# Procs\n")
-    md.add(mdCodeProc)
-  if mdCodeTemplate.len() > 0:
-    md.add("# Templates\n")
-    md.add(mdCodeTemplate)
-  if mdCodeMacro.len() > 0:
-    md.add("# Macros\n")
-    md.add(mdCodeMacro)
-  if mdCodeIterator.len() > 0:
-    md.add("# Iterators\n")
-    md.add(mdCodeIterator)
-  if mdCodeFunc.len() > 0:
-    md.add("# Funcs\n")
-    md.add(mdCodeFunc)
-  if mdCodeOther.len() > 0:
-    md.add("# Other\n")
-    md.add(mdCodeOther)
-  return md
-
-proc markdownShow() =
-  ## Echo markdown
-  let md = generateMarkdown()
-  if md.len() == 0:
-    styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
-  else:
-    for line in md.split("\n"):
-      echo line
-
-proc markdownToFile(filename: string, overwrite = false) =
-  ## Save markdown to file
-  if not overwrite and fileExists(filename):
-    styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "File exists. Use -ow to overwrite.")
-  else:
-    let md = generateMarkdown()
-    if md.len() == 0:
-      styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
-
-    writeFile(filename, md)
-
-proc parseNim(filename: string) =
-  ## Loop through file and generate Markdown
-  initMdContainers()
-  for line in lines(filename):
-    if not fileCheckBasic(line):
-      lineLast = line
-      continue
-    if not codeIsReached:
-      if not textTop(line):
-        lineLast = line
-        continue
-    else:
-      if not textCode(line):
-        lineLast = line
-        continue
-  appendLastLine()
-
-proc parseNimFile(filename: string) =
-  ## Loop through file and generate Markdown
-  initMdContainers()
-  for line in lines(filename):
-    if not fileCheckBasic(line):
-      continue
-    if not codeIsReached:
-      if not textTop(line):
-        continue
-    else:
-      if not textCode(line):
-        continue
-  appendLastLine()
-
-proc parseNimString(content: string) =
-  ## Loop through string and generate Markdown
-  initMdContainers()
-  for line in split(content, "\n"):
-    if not fileCheckBasic(line):
-      continue
-    if not codeIsReached:
-      if not textTop(line):
-        continue
-    else:
-      if not textCode(line):
-        continue
-  appendLastLine()
-
-proc parseNimFileString*(filename: string): string =
-  ## Loop through file and generate Markdown to string
-  parseNimFile(filename)
-  return generateMarkdown()
-
-proc parseNimFileSeq*(filename: string): seq[string] =
-  ## Loop through file and generate Markdown to seq[string]
-  parseNimFile(filename)
-  return generateMarkdownSeq()
-
-proc parseNimContentString*(content: string): string =
-  ## Loop through string and generate Markdown to string
-  parseNimString(content)
-  return generateMarkdown()
-
-proc parseNimContentSeq*(content: string): seq[string] =
-  ## Loop through string and generate Markdown to seq[string]
-  parseNimString(content)
-  return generateMarkdownSeq()
+  -g,  --onlyglobals        Only include global elements (*)
+  -sh                       Skip headings
+  -si                       Skip imports
+  -st                       Skip types
+  -il, --includelines       Include linenumbers
+  -ic, --includeconst       Include const
+  -il, --includelet         Include let
+  -iv, --includevar         Include var
+"""
 
 when isMainModule:
+  let time1 = epochTime()
+
   let args = multiReplace(commandLineParams().join(","), [("-", ""), (" ", "")])
   case args
-  of "", " ":
-    echo nimtomd
-
-  of "h", "help":
+  of "", " ", "h", "help":
     echo help
 
   else:
-    var toFile = false
-    var outputFile = ""
-    var overwrite = false
-    let argsSplit = args.split(",")
+    var
+      outputFile  = ""
+      overwrite           = false
+      argOnlyGlobals      = false
+      argIncludeHeadings  = true
+      argIncludeImport    = true
+      argIncludeTypes     = true
+      argIncludeLines     = false
+      argIncludeConst     = false
+      argIncludeLet       = false
+      argIncludeVar       = false
+
+    let
+      argsSplit = args.split(",")
+
+    # Go through args
     for arg in argsSplit:
       if arg.contains("o:"):
         outputFile = arg.substr(2, arg.len())
@@ -756,16 +1000,47 @@ when isMainModule:
         outputFile = arg.substr(7, arg.len())
       elif arg == "ow" or arg == "overwrite":
         overwrite = true
-      elif arg == "global" or arg == "g":
-        globalOnly = true
+      elif arg == "onlyglobals" or arg == "g":
+        argOnlyGlobals = true
+      elif arg == "skipheading" or arg == "sh":
+        argIncludeHeadings = false
+      elif arg == "skipimports" or arg == "si":
+        argIncludeImport = false
+      elif arg == "skiptypes" or arg == "st":
+        argIncludeTypes = false
+      elif arg == "includelines" or arg == "il":
+        argIncludeLines = true
+      elif arg == "includeconst" or arg == "ic":
+        argIncludeConst = true
+      elif arg == "includelet" or arg == "il":
+        argIncludeLet = true
+      elif arg == "includevar" or arg == "iv":
+        argIncludeVar = true
 
-    if fileExists(argsSplit[argsSplit.len() - 1]):
-      parseNim(argsSplit[argsSplit.len() - 1])
-    else:
+    # Check if file with code exists
+    if not fileExists(argsSplit[argsSplit.len() - 1]):
       styledWriteLine(stderr, fgRed, "ERROR: ", resetStyle, "File not found: " & argsSplit[argsSplit.len() - 1])
       quit(0)
 
+    # Check if we are going to write the markdown to a file. Then also check if
+    # the file already exists- then the -ow arg needs to be specificed.
+    if outputFile != "" and fileExists(outputFile) and not overwrite:
+      styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "Output file already exists. Specify -ow to overwrite it.")
+      quit(0)
+
+    # Generate markdown
+    let markdown = parseNim(argsSplit[argsSplit.len() - 1], onlyGlobals=argOnlyGlobals, includeHeadings=argIncludeHeadings, includeImport=argIncludeImport, includeTypes=argIncludeTypes, includeLines=argIncludeLines, includeConst=argIncludeConst, includeLet=argIncludeLet, includeVar=argIncludeVar)
+
+    if markdown.len() == 0:
+      styledWriteLine(stderr, fgYellow, "WARNING: ", resetStyle, "No markdown was generated.")
+      quit(0)
+
+    # Output markdown
     if outputFile.len() != 0:
-      markdownToFile(outputFile, overwrite)
+      markdownToFile(outputFile, markdown)
     else:
-      markdownShow()
+      markdownShow(markdown)
+
+    let time2 = epochTime()
+    styledWriteLine(stderr, fgGreen, "OK: ", resetStyle, "Time used: " & $(time2 - time1) & " seconds")
+
