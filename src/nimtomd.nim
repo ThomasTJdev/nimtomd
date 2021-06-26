@@ -209,6 +209,12 @@ proc fillVariable(element: string, headLineNr: int, isGlobal: bool, head, commen
 
   hasAnyData = true
 
+proc isAlphaNumeric(s: string): bool =
+  ## WHY! WHY! WHY don't we have this is in std?
+  for c in s:
+    if not isAlphaNumeric(c):
+      return false
+  return true
 
 proc parseVariable(elementValue: string, lineCurrentNr: int, file: seq[string]) =
   ## Parse a const, var or let
