@@ -209,7 +209,7 @@ proc fillVariable(element: string, headLineNr: int, isGlobal: bool, head, commen
 
   hasAnyData = true
 
-proc isAlphaNumeric(s: string): bool =
+proc isAlphaNumericStr(s: string): bool =
   ## WHY! WHY! WHY don't we have this is in std?
   for c in s:
     if not isAlphaNumeric(c):
@@ -407,7 +407,7 @@ proc parseType(lineCurrentNr: int, file: seq[string]) =
       break
 
     # Get heading - indent = 2
-    if file[lineNr].substr(0,1) == "  " and isAlphaNumeric(file[lineNr].substr(2,2)):
+    if file[lineNr].substr(0,1) == "  " and isAlphaNumericStr(file[lineNr].substr(2,2)):
       # Code check
       if isLowerAscii(file[lineNr][2]):
         styledWriteLine(stderr, fgRed, "ERROR: ", resetStyle, "Type is starting with a lower ASCII: " & line)
@@ -437,7 +437,7 @@ proc parseType(lineCurrentNr: int, file: seq[string]) =
       continue
 
     # Get items - indent = 4
-    if file[lineNr].substr(0,3) == "    " and isAlphaNumeric(file[lineNr].substr(4,4)):
+    if file[lineNr].substr(0,3) == "    " and isAlphaNumericStr(file[lineNr].substr(4,4)):
       let cleanCode = file[lineNr].replace(re"\W#\s.*", "")
 
       # Check if comment is present

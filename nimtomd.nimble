@@ -1,5 +1,5 @@
 # Package
-version       = "0.3.1"
+version       = "0.3.2"
 author        = "ThomasTJdev"
 description   = "Convert Nim files to markdown"
 license       = "MIT"
